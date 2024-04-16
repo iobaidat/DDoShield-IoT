@@ -11,17 +11,19 @@ import datetime
 import yaml
 import random
 import shutil
+import getpass
 
 __author__ = 'chepeftw'
 
-numberOfNodesStr = '20'
+numberOfDevsStr = '1'
+numberOfOthers = 3 # nodes other than Devs (TServer, IDS, and Attacker)
+numberOfNodes = numberOfOthers + int(numberOfDevsStr) # all nodes in the simulatin
 emulationTimeStr = '600'
 churn = '0'
 ns3FileLog = '0'
 scenarioSize = '5'
 network = 'csma'
-numberOfNodes = 0
-devs=0
+exploit=0
 jobs = max(1, os.cpu_count() - 1)
 nameList = []
 
@@ -29,12 +31,15 @@ baseContainerNameConn = 'myconnmanbox'
 baseContainerNameDnsm = 'mydnsmasqbox'
 baseContainerNameAtt = 'myattackbox'
 
+writeDirectory = ''
 pidsDirectory = "./var/pid/"
 
-ns3Version='3.38'
+ns3Version=''
+with open('network/ns3_version') as f:
+    ns3Version = f.readline()
 
 def main():
-    global numberOfNodesStr, \
+    global numberOfDevsStr, \
         emulationTimeStr, \
         churn, \
         ns3FileLog, \
@@ -42,8 +47,15 @@ def main():
         scenarioSize, \
         numberOfNodes, \
         nameList, \
-        devs, \
-        jobs
+        exploit, \
+        jobs, \
+        writeDirectory, \
+        numberOfOthers
+
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)  # Handle Ctrl+C
+    signal.signal(signal.SIGTSTP, signal_handler) # Handle Ctrl+Z
+    signal.signal(signal.SIGQUIT, signal_handler) # Handle Ctrl+\
 
     ###############################
     # n == number of nodes
@@ -53,13 +65,13 @@ def main():
     parser = argparse.ArgumentParser(description="DDoSim Implementation.", add_help=True)
     parser.add_argument("operation", action="store", type=str, choices=['create', 'ns3', 'emulation', 'destroy'], help="The name of the operation to perform, options: create, ns3, emulation, destroy")
 
-    parser.add_argument("-n", "--number", action="store",type=int, help="The number of nodes to simulate")
+    parser.add_argument("-d", "--devs", action="store",type=int, help="The number of Devs in the simulation")
 
     parser.add_argument("-t", "--time", action="store", type=int, help="The time in seconds of NS3 simulation")
 
-    parser.add_argument("-net", "--network", action="store", type=str, choices=['csma', 'wifi'], help="The type of network, options: csma, wifi")
+    parser.add_argument("-n", "--network", action="store", type=str, choices=['csma', 'wifi'], help="The type of network, options: csma, wifi")
 
-    parser.add_argument("-ch", "--churn", action="store", type=str, choices=['0', '1', '2'], help="Enable Nodes churn, options: 0, 1, or 2 ; these options are: no churn, static, or dynamic")
+    parser.add_argument("-c", "--churn", action="store", type=str, choices=['0', '1', '2'], help="Enable Nodes churn, options: 0, 1, or 2 ; these options are: no churn, static, or dynamic")
 
     parser.add_argument("-l", "--log", action="store", type=str, choices=['0', '1', '2'], help="Log from NS3 to File, options: 0, 1, or 2 ; these options are: no log, pcap only, or log pcap and statistics. If log is enabled, the files will be stored in desktop")
 
@@ -69,17 +81,17 @@ def main():
 
     parser.add_argument('-v', '--version', action='version', version='%(prog)s 3.0')
 
-    parser.add_argument("-d", "--devs", action="store", type=int, choices=[0 , 1 , 2], help="Used software for Devs, options: 0, 1, or 2 ; these options are: Connman, Dnsmasq, or both (Connman and Dnsmasq). If both is enabled, Devs will be assigned Connman or Dnsmasq randomly")
+    parser.add_argument("-x", "--exploit", action="store", type=int, choices=[0 , 1 , 2], help="Used exploit for Devs, options: 0, 1, or 2 ; these options are: Connman, Dnsmasq, or both (Connman and Dnsmasq). If both is enabled, Devs will be assigned Connman or Dnsmasq randomly")
 
     args, unknown = parser.parse_known_args()
 
     if len(unknown):
-        print('\x1b[6;30;41m' + '\nUnknown arument: ' +str(unknown)+ '\x1b[0m')
+        print('\x1b[6;30;41m' + '\nUnknown argument: ' +str(unknown)+ '\x1b[0m')
         parser.print_help()
         sys.exit(2)
 
-    if args.number:
-        numberOfNodesStr = args.number
+    if args.devs:
+        numberOfDevsStr = args.devs
     if args.time:
         emulationTimeStr = args.time
     if args.network:
@@ -90,8 +102,8 @@ def main():
         ns3FileLog = args.log
     if args.size:
         scenarioSize = args.size
-    if args.devs:
-        devs = args.devs
+    if args.exploit:
+        exploit = args.exploit
     if args.jobs:
         jobs = int(args.jobs)
 
@@ -99,12 +111,12 @@ def main():
 
     # Display input and output file name passed as the args
     print("\nOperation : %s" % operation)
-    print("Number of nodes : %s" % numberOfNodesStr)
+    print("Number of Devs : %s" % numberOfDevsStr)
     print("Simulation time : %s" % emulationTimeStr)
     print("Network Type : %s" % network)
     print("Churn : %s" % ("no churn" if churn=='0' else "static churn" if churn=='1' else "dynamic churn"))
     print("NS3 File Log : %s" % ("disabled" if ns3FileLog=='0' else "enabled"))
-    print("Devs : %s" % ("Connman" if devs==0 else "Dnsmasq" if devs==1 else "Connman and Dnsmasq"))
+    print("Exploit : %s" % ("Connman" if exploit==0 else "Dnsmasq" if exploit==1 else "Connman and Dnsmasq"))
 
     if network == 'wifi':
         print("Scenario Size (Disk): %s" % (scenarioSize))
@@ -114,16 +126,16 @@ def main():
 
     os.environ["DOCKER_CLI_EXPERIMENTAL"] = "enabled"
 
-    numberOfNodes = int(numberOfNodesStr) + 1 # TServer
+    numberOfNodes = int(numberOfDevsStr) + numberOfOthers
 
-    if numberOfNodes < 3:
-        print("number of nodes should be 2 or more")
+    if int(numberOfDevsStr) < 1:
+        print("number of Devs should be 1 or more")
         sys.exit(2)
 
     global base_name
     base_name = "emu"
 
-    for x in range(0, numberOfNodes+2): # we are not using emu0 or emu1
+    for x in range(0, numberOfNodes+1): # we are not using emu0
         nameList.append(base_name + str(x))
 
     if operation == "create":
@@ -202,10 +214,53 @@ def process(command, message = None, code = 2):
         print('\r' + out, end="", flush=True)
     return process.returncode
 
+
+################################################################################
+# Write Directory ()
+################################################################################
+
+def obtain_write_dir():
+    global writeDirectory
+
+    writeDirectory = ''
+
+    # Get the current working directory
+    current_directory = os.getcwd()
+    folder_name = "results"
+    writeDirectory = os.path.join(current_directory, folder_name)
+
+    try:
+        # Check if the folder already exists
+        if not os.path.exists(writeDirectory):
+            # Create the new folder
+            os.makedirs(writeDirectory)
+            print(f"\nFolder '{folder_name}' directory {writeDirectory}\n")
+
+    except PermissionError:
+        print(f"\nPermission denied: Unable to create folder at {writeDirectory}")
+        sys.exit(2)
+    except Exception as e:
+        print(f"\nAn error occurred: {e}")
+        sys.exit(2)
+
+
+################################################################################
+# Hadnle Inturrupts ()
+################################################################################
+def signal_handler(signum, frame):
+    # Notify the user about the interrupt and perform cleanup
+    print("\n\nInterrupt signal received.")
+
+    destroy()
+
+    print("\nExiting...")
+    sys.exit(0)
+
 ################################################################################
 # create ()
 ################################################################################
 def create():
+    global numberOfOthers
     print("Creating ...\n")
     docker_files = 0
     if os.path.exists(pidsDirectory):
@@ -224,16 +279,28 @@ def create():
     #############################
     # First we make sure we are running the latest version of our Ubuntu container
 
+    # ---------------------------------------------
+    # ---------------------------------------------
+    # make sure to adjust "numberOfOthers" based on
+    # the number that you have (other than Devs)
+    # ---------------------------------------------
+    # ---------------------------------------------
+
+    # TServer
+    r_code = subprocess.call("DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 -t tserver docker/TServer/.", shell=True)
+    check_return_code(r_code, "Building TServer container\n")
+
+    # Attacker
     r_code = subprocess.call("DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 -t %s docker/Attacker/." % baseContainerNameAtt, shell=True)
-    check_return_code(r_code, "Building attacker container %s" % baseContainerNameAtt)
+    check_return_code(r_code, "Building attacker container %s\n" % baseContainerNameAtt)
 
-    if devs == 0 or devs == 2 :
-        r_code = subprocess.call("DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 -t %s docker/Devs_connman/." % baseContainerNameConn, shell=True)
-        check_return_code(r_code, "Building nodes container %s" % baseContainerNameConn)
+    # IDS
+    r_code = subprocess.call("DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 -t ids docker/IDS/.", shell=True)
+    check_return_code(r_code, "Building IDS container\n")
 
-    if devs == 1 or devs == 2 :
-        r_code = subprocess.call("DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 -t %s docker/Devs_dnsmasq/." % baseContainerNameDnsm, shell=True)
-        check_return_code(r_code, "Building nodes container %s" % baseContainerNameDnsm)
+    # Devs
+    r_code = subprocess.call("DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 -t %s docker/Devs/." % baseContainerNameDnsm, shell=True)
+    check_return_code(r_code, "Building nodes container %s\n" % baseContainerNameDnsm)
 
     r_code = subprocess.call('[ -d "$NS3_HOME" ]', shell=True)
     if r_code !=0 :
@@ -253,8 +320,8 @@ def create():
     r_code = subprocess.call("cd $NS3_HOME && ./ns3 build -j {}".format(jobs), shell=True)
 
     if r_code !=0 :
-        print("Unable to build NS3 in", (os.environ['NS3_HOME']), ", let's try to reconfigure. Then, try again~")
-        r_code = subprocess.call("cd $NS3_HOME && ./ns3 clean &&./ns3 configure --enable-sudo --disable-examples --disable-tests --disable-python --build-profile=optimized && ./ns3 build -j {}".format(jobs), shell=True)
+        print("\nUnable to build NS3 in", (os.environ['NS3_HOME']), ", let's try to reconfigure. Then, try again~")
+        r_code = subprocess.call("cd $NS3_HOME && ./ns3 clean && ./ns3 distclean &&./ns3 configure --enable-sudo --disable-examples --disable-tests --disable-python --build-profile=optimized && ./ns3 build -j {}".format(jobs), shell=True)
 
     check_return_code(r_code,"NS3 BUILD")
 
@@ -275,19 +342,19 @@ def create():
 
     # https://github.com/dperson/openvpn-client/issues/75
     acc_status = 0
-    acc_status = process("docker run --platform linux/amd64 --restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged -dit --net=none --name %s %s" % (nameList[2], baseContainerNameAtt), None, 1)
 
-    selected = 1
-    for x in range(3, (numberOfNodes+1)):
-        if devs == 1:
-            selected = 2
-        elif devs == 2:
-            selected = random.choice([1, 2]) # Connman or Dnsmasq
+    # TServer
+    acc_status += process('docker run --platform linux/amd64 -v %s/docker/videos:/var/www/html/ --restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged -dit --net=none --name %s %s' % (dir_path, nameList[1], 'tserver'), None, 1)
 
-        if selected ==1:
-            acc_status += process("docker run --platform linux/amd64 --restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged -dit --net=none --name %s %s" % (nameList[x], baseContainerNameConn), None, 0)
-        else:
-            acc_status += process("docker run --platform linux/amd64 --restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged -dit --net=none --name %s %s" % (nameList[x], baseContainerNameDnsm), None, 0)
+    # Attacker
+    acc_status = process('docker run --platform linux/amd64 --restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged -dit --net=none --name %s %s' % (nameList[2], baseContainerNameAtt), None, 1)
+
+    # IDS
+    acc_status += process('docker run --platform linux/amd64 --restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged -dit --net=none --name %s %s' % (nameList[3], 'ids'), None, 1)
+
+    # Devs
+    for x in range(numberOfOthers + 1, (numberOfNodes + 1)):
+        acc_status += process("docker run --platform linux/amd64 -v %s/docker/videos:/data/ --restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged -dit --net=none --name %s %s" % (dir_path, nameList[x], baseContainerNameDnsm), None, 0)
 
     # If something went wrong running the docker containers, we panic and exit
     check_return_code(acc_status, "Running docker containers")
@@ -300,7 +367,7 @@ def create():
     # Based on NS3 scripts ... https://www.nsnam.org/docs/release/3.25/doxygen/tap-wifi-virtual-machine_8cc.html
     # But in the source you can find more examples in the same dir.
     acc_status = 0
-    for x in range(2, numberOfNodes+1):
+    for x in range(1, numberOfNodes + 1):
         acc_status += process("bash connections/singleSetup.sh %s" % (nameList[x]), None, 0)
 
     check_return_code(acc_status, "Creating bridge and tap interface")
@@ -322,7 +389,7 @@ def create():
     # we create the bridges for the docker containers
     # https://docs.docker.com/v1.7/articles/networking/
     acc_status = 0
-    for x in range(2, numberOfNodes+1):
+    for x in range(1, numberOfNodes + 1):
         cmd = ['docker', 'inspect', '--format', "'{{ .State.Pid }}'", nameList[x]]
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         out, err = p.communicate()
@@ -355,9 +422,26 @@ def create():
 # ns3 ()
 ################################################################################
 def ns3(code = 0):
+    global numberOfOthers
     print("NS3 ...\n")
     docker_files = 0
     verify_num_nodes()
+
+    # IDS setup
+    r_code = subprocess.call("sudo modprobe ifb", shell=True)
+    check_return_code(r_code, "ifb device to redirect packets")
+
+    r_code = subprocess.call("PID=`docker inspect --format '{{ .State.Pid }}' emu3` && sudo ip netns exec $PID ifconfig eth0 0.0.0.0 promisc up", shell=True)
+    check_return_code(r_code, "Promiscuous mode for IDS")
+
+    r_code = subprocess.call("sudo tc qdisc add dev tap-emu3 ingress && sudo tc filter add dev tap-emu3 parent ffff: protocol all u32 match u32 0 0 action mirred egress redirect dev si-emu3", shell=True)
+    check_return_code(r_code, "mirror Traffic from 'tap-emu3' to 'si-emu3'")
+
+    r_code = subprocess.call('[ -d "$NS3_HOME" ]', shell=True)
+    if r_code !=0 :
+        print("Unable to find NS3 in", (os.environ['NS3_HOME']), ", make sure the 'install.sh' file was executed correctly")
+    check_return_code(r_code,"Checking NS3 directory")
+
 
     if os.path.exists(pidsDirectory + "ns3"):
         with open(pidsDirectory + "ns3", "rt") as in_file:
@@ -368,22 +452,21 @@ def ns3(code = 0):
 
     total_emu_time = emulationTimeStr
 
+    obtain_write_dir()
+
     print('About to start NS3 RUN with total emulation time of %s' % str(total_emu_time))
 
     tmp = 'cd $NS3_HOME && '
     ns3_cmd = ''
     if network == 'wifi':
         tmp += './ns3 run -j {0} "scratch/tap-vm --NumNodes={1} --TotalTime={2} --TapBaseName=emu '
-        tmp += '--DiskDistance={3} --Churn={4} --FileLog={5}"'
-        ns3_cmd = tmp.format(jobs, str(numberOfNodes), total_emu_time, scenarioSize, churn, ns3FileLog)
+        tmp += '--DiskDistance={3} --Churn={4} --FileLog={5} --WriteDirectory={6} --NoneDevsNodes={7}"'
+        ns3_cmd = tmp.format(jobs, str(numberOfNodes), total_emu_time, scenarioSize, churn, ns3FileLog, writeDirectory, numberOfOthers)
     else:
-        tmp += './ns3 run -j {0} "scratch/tap-vm --NumNodes={1} --TotalTime={2} --Churn={3} --FileLog={4} --TapBaseName=emu '
-        tmp += '--AnimationOn=false"'
-        ns3_cmd = tmp.format(jobs, str(numberOfNodes), total_emu_time, churn, ns3FileLog)
+        tmp += './ns3 run -j {0} "scratch/tap-vm --NumNodes={1} --TotalTime={2} --Churn={3} --FileLog={4} --TapBaseName=emu --WriteDirectory={5} --NoneDevsNodes={6} --AnimationOn=false"'
+        ns3_cmd = tmp.format(jobs, str(numberOfNodes), total_emu_time, churn, ns3FileLog, writeDirectory, numberOfOthers)
 
     print("NS3_HOME=%s && %s"% ((os.environ['NS3_HOME']).strip(), ns3_cmd))
-
-    import getpass
  
     try:
         p = getpass.getpass(prompt='Sudo password:')
@@ -400,17 +483,6 @@ def ns3(code = 0):
     time.sleep(10)
     proc1.poll()
     input('\nPress the Enter key to continue...')
-
-    '''
-    #https://stackoverflow.com/questions/54319960/wait-for-a-prompt-from-a-subprocess-before-sending-stdin-input
-    proc1 = subprocess.Popen(ns3_cmd,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
-    import pexpect.fdpexpect
-    o=pexpect.fdpexpect.fdspawn(proc1.stdout.fileno())
-    o.expect("Sudo password:\n")
-    proc1.stdin.write(p+'\n')
-    proc1.stdin.close()
-    print(proc1.stdout.read())
-    '''
 
     print('proc1 = %s' % proc1.pid)
 
@@ -458,7 +530,7 @@ def run_emu():
 
     print("Restarting containers")
     acc_status = 0
-    for x in range(2, numberOfNodes+1):
+    for x in range(1, numberOfNodes + 1):
         acc_status += process("docker restart -t 0 %s" % nameList[x], None, 0)
     check_return_code_chill(acc_status, "Restarting containers")
 
@@ -470,7 +542,7 @@ def run_emu():
     #check_return_code_chill(acc_status, "Restarting containers")
 
     r_code = 0
-    for x in range(2, numberOfNodes+1):
+    for x in range(1, numberOfNodes + 1):
         if os.path.exists(pidsDirectory + nameList[x]):
             with open(pidsDirectory + nameList[x], "rt") as in_file:
                 text = in_file.read()
@@ -487,7 +559,7 @@ def run_emu():
     check_return_code_chill(r_code, "Destroying all docker bridges")
 
     acc_status = 0
-    for x in range(2, numberOfNodes+1):
+    for x in range(1, numberOfNodes + 1):
         acc_status += process("bash connections/container.sh %s %s" % (nameList[x], x), "Creating new bridge side-int-X and side-ext-X for %s"%(nameList[x]), 0)
 
     check_return_code_chill(acc_status, "Cleaning old netns and setting up new")
@@ -530,9 +602,10 @@ def destroy():
                     check_return_code_chill(0, "Killing the NS3 Process")
                 except Exception as ex:
                     check_return_code_chill(1, "Killing the NS3 Process\n"+ex)
+
             r_code = subprocess.call("sudo rm -rf %s" % (pidsDirectory +"ns3"), shell=True)
             check_return_code_chill(r_code, "Removing the NS3 pid file")
-
+            r_code = process("sudo modprobe -r ifb")
     print("DESTROYING ALL CONTAINERS")
 
     r_containers = subprocess.check_output("docker ps -a -q", shell=True).decode('utf-8')
@@ -555,12 +628,12 @@ def destroy():
                     nameList.append(base_name + str(x + 1))
 
     r_code = 0
-    for x in range(2, numberOfNodes+1):
+    for x in range(1, numberOfNodes + 1):
         r_code += process("bash connections/singleDestroy.sh %s" % (nameList[x]), "Destroying bridge and tap interface %s" % (nameList[x]), 0)
     check_return_code_chill(r_code, "Destroying bridge and tap interface")
 
     r_code = 0
-    for x in range(2, numberOfNodes+1):
+    for x in range(1, numberOfNodes + 1):
         if os.path.exists(pidsDirectory + nameList[x]):
             with open(pidsDirectory + nameList[x], "rt") as in_file:
                 text = in_file.read()
@@ -568,7 +641,7 @@ def destroy():
     check_return_code_chill(r_code, "Destroying docker bridges")
 
     r_code = 0
-    for x in range(1, numberOfNodes+1):
+    for x in range(1, numberOfNodes + 1):
         r_code += process("sudo rm -rf %s" % (pidsDirectory + nameList[x]))
     check_return_code_chill(r_code, "Removing pids files")
 
