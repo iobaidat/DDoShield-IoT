@@ -23,7 +23,6 @@ churn = '0'
 ns3FileLog = '0'
 scenarioSize = '5'
 network = 'csma'
-exploit=0
 jobs = max(1, os.cpu_count() - 1)
 nameList = []
 
@@ -47,7 +46,6 @@ def main():
         scenarioSize, \
         numberOfNodes, \
         nameList, \
-        exploit, \
         jobs, \
         writeDirectory, \
         numberOfOthers
@@ -81,8 +79,6 @@ def main():
 
     parser.add_argument('-v', '--version', action='version', version='%(prog)s 3.0')
 
-    parser.add_argument("-x", "--exploit", action="store", type=int, choices=[0 , 1 , 2], help="Used exploit for Devs, options: 0, 1, or 2 ; these options are: Connman, Dnsmasq, or both (Connman and Dnsmasq). If both is enabled, Devs will be assigned Connman or Dnsmasq randomly")
-
     args, unknown = parser.parse_known_args()
 
     if len(unknown):
@@ -102,8 +98,6 @@ def main():
         ns3FileLog = args.log
     if args.size:
         scenarioSize = args.size
-    if args.exploit:
-        exploit = args.exploit
     if args.jobs:
         jobs = int(args.jobs)
 
@@ -116,7 +110,6 @@ def main():
     print("Network Type : %s" % network)
     print("Churn : %s" % ("no churn" if churn=='0' else "static churn" if churn=='1' else "dynamic churn"))
     print("NS3 File Log : %s" % ("disabled" if ns3FileLog=='0' else "enabled"))
-    print("Exploit : %s" % ("Connman" if exploit==0 else "Dnsmasq" if exploit==1 else "Connman and Dnsmasq"))
 
     if network == 'wifi':
         print("Scenario Size (Disk): %s" % (scenarioSize))

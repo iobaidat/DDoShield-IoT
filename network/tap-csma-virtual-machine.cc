@@ -65,6 +65,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <vector>
 #include <time.h>
 #include <sys/stat.h>
 
@@ -85,7 +86,7 @@ NS_LOG_COMPONENT_DEFINE ("TapCsmaVirtualMachineExample");
 
 
 void
-Churn(bool isChurn[], NetDeviceContainer *devs, int churn_lev, int NoneDevsNodes)
+Churn(std::vector<bool>& isChurn, NetDeviceContainer *devs, int churn_lev, int NoneDevsNodes)
 {
   double q_h, e_h, l_h,L_h;
   double phi_1 = 0.16, phi_2 = 0.08, phi_3 = 0.04;
@@ -237,7 +238,7 @@ main (int argc, char *argv[])
   // churn
   if (churn != 0)
   {
-    bool isChurn[NumNodes + 1];
+    std::vector<bool> isChurn(NumNodes + 1);
     for(int i = 0; i <= NumNodes; i++)
     {
         isChurn[i] = false;

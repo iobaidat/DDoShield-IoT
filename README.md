@@ -10,9 +10,9 @@ The framework consists of four main components:
 
 1. **Attacker**: A Docker node representing the attacker, loaded with tools and scripts for remotely exploiting and controlling Devs.
 2. **Devs**: A variable number of Docker nodes representing target devices, loaded with actual vulnerable IoT binaries.
-3. **TServer**: A customized NS-3 node representing the target of the botnet DDoS attack.
-4. **IDS**: A Docker node representing a Real-Time IDS Unit that leverages ML models for
-botnet DDoS attack detection.
+3. **TServer**: A customized Docker node representing a sink server and the target of the botnet DDoS attack.
+4. **IDS**: A Docker node representing a Real-Time IDS Unit that leverages ML models for botnet DDoS attack detection.
+
 <br/>
 <p align="center">
 <img alt="DDoSim Framework Overview" src="DDoShield-IoT.png" width=70% height=70%>
@@ -36,7 +36,7 @@ botnet DDoS attack detection.
 
 ### Installation:
 
-> **Note**: The steps are verified on Ubuntu 22.04 LTS and Debian 12. The current version of DDoSim uses NS3 version 3.38 and Docker version 20.10.
+> **Note**: The steps are verified on Ubuntu 24.04 LTS and Debian 12. The current version of DDoSim uses NS3 version 3.42 and Docker version 24.0.7.
 
 1. Install Git:
 
@@ -44,44 +44,38 @@ botnet DDoS attack detection.
   sudo apt-get install -y git
   ```
 
-2. tc is a part of the iproute2 package (usually installed by default on most Linux distributions)
-```bash
-sudo apt-get update
-sudo apt-get install iproute2
-```
-
-3. Clone the DDoShield-IoT repository:
+2. Clone the DDoShield-IoT repository:
 
   ```bash
   git clone https://github.com/iobaidat/DDoShield-IoT.git
   ```
 
-4. Change the permissions of the files in the downloaded directory:
+3. Change the permissions of the files in the downloaded directory:
 
   ```bash
-  chmod +x -R DDoShield-IoT/
+  sudo chmod +x -R DDoShield-IoT/
   ```
 
-5. Navigate to the downloaded directory:
+4. Navigate to the downloaded directory:
 
   ```bash
   cd DDoShield-IoT/
   ```
 
-6. Run the [./install.sh](install.sh) script to install DDoShield-IoT's dependencies:
+5. Run the [./install.sh](install.sh) script to install DDoShield-IoT's dependencies:
  > **Note**: Do not use ```sudo``` with this command, ```sudo``` is placed wherever it is needed in this script.
 
   ```bash
   ./install.sh
   ```
 
-7. After successful installation, reboot the system
+6. After successful installation, reboot the system
 <br/>
 
 ## **Usage**
 
 
-### Nodes creation (Attacker, Devs and TServer):
+### Nodes creation (Attacker, Devs, IDS, and TServer):
 
 > **Note**: </br>
 > &nbsp; &nbsp; &nbsp; &nbsp;&nbsp;  - The framework uses a python script ```main.py``` to perform all of the main operations </br>
@@ -93,10 +87,10 @@ sudo apt-get install iproute2
   ```bash
   cd DDoShield-IoT/
   ```
-2. To Create a specfic number of nodes, use the following command:
+2. To Create a specfic number of Devs (i.e., Devices), use the following command:
 
     ```bash
-    ./main.py -d <nodes> create
+    ./main.py -d <devs> create
     ```
     e.g.,:
     ```bash
@@ -106,7 +100,7 @@ sudo apt-get install iproute2
 3. To connect the nodes to the NS3 network simulator, use the following command:
 
     ```bash
-    ./main.py -d <nodes> ns3
+    ./main.py -d <devs> ns3
     ```
     e.g.,:
     ```bash
@@ -154,14 +148,14 @@ sudo apt-get install iproute2
     ack 10.0.0.1 2 dport=9
     ```
 
-    > **Note**: The IP address "10.0.0.1" is the IP of TServer. This IP is the same across all runs. You can also see this IP in the same terminal that you run the ```./main.py -d <nodes> ns3``` command.
+    > **Note**: The IP address "10.0.0.1" is the IP of TServer. This IP is the same across all runs. You can also see this IP in the same terminal that you run the ```./main.py -d <devs> ns3``` command.
 
 ### Destroy nodes and reclaim used resources:
 
 1. The created nodes should be destroyed to create a different number of new nodes. To do so use the following command:
 
     ```bash
-    ./main.py -d <nodes> destroy
+    ./main.py -d <devs> destroy
     ```
     e.g.,:
 
@@ -174,15 +168,19 @@ sudo apt-get install iproute2
 
 If you use DDoShield-IoT in your research, please consider citing our paper to acknowledge the work we've put into the project. You can find our paper at the following link:
 
-[DDOSHIELD-IoT: A Testbed for Simulating and Lightweight Detection of IoT Botnet DDoS Attacks]()
+[DDoShield-IoT: A Testbed for Simulating and Lightweight Detection of IoT Botnet DDoS Attacks](devivo2024ddoshieldiot.pdf)
 
 Here is a citation in BibTeX format for your convenience:
 
    ```
-   @inproceedings{
-    }
+   @inproceedings{devivo2024ddoshieldiot,
+     title={{DDoShield-IoT}: A Testbed for Simulating and Lightweight Detection of {IoT} Botnet {DDoS} Attacks},
+     author={Simona De Vivo and Islam Obaidat and Dong Dai and Pietro Liguori},
+     booktitle={54rd Annual IEEE/IFIP International Conference on Dependable Systems and Networks Workshops (DSN-W)},
+     pages={1--8},
+     year={2024}
+   }
    ```
-
 
 
 
@@ -195,13 +193,13 @@ We warmly welcome contributions to the DDoSim project. If you're interested in g
 The DDoSim source code is organized into files and directories as follows:
 - `install.sh`: This is a bash script responsible for installing the necessary dependencies for DDoSim.
 - `main.py`: This is our primary file, tasked with creating, managing, and terminating DDoSim's simulations.
-- `docker`: This directory houses the Docker container files (Dockerfile), which are tasked with loading the Attacker, IDS, and Dev nodes with their necessary binaries.
+- `docker`: This directory houses the Docker container files (Dockerfile), which are tasked with loading the Attacker, IDS, TServer, and Dev nodes with their necessary binaries.
 - `connections`: This directory contains scripts that maintain the connections of the various Docker nodes within the NS3 network.
 - `network`: This directory includes the NS3 simulator code base as well as our network setup codes.
 
 
 ## Acknowledgements
-We would like to extend our gratitude to the [NS3DockerEmulator](https://github.com/chepeftw/NS3DockerEmulator/) project for providing the foundational framework upon which DDOSim was built. This crucial resource enabled us to create a powerful and versatile simulation tool for studying DDoS attacks.
+This framework was built on top of [DDoSim](https://github.com/sridhar-research-lab/DDoSim/).
 
 
 ## Contact

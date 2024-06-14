@@ -105,7 +105,7 @@ echo -e "\n\n Installing Docker required packages  ... \n"
 
 sudo apt-get remove containerd.io -y 2> /dev/null
 
-check_code "sudo apt-get install -y -q docker docker.io" "Installing Docker"
+check_code "sudo apt-get install -y -q docker.io" "Installing Docker"
 
 check_code "sudo docker run hello-world" "Testing Docker"
 
