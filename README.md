@@ -176,7 +176,7 @@ Here is a citation in BibTeX format for your convenience:
    @inproceedings{devivo2024ddoshieldiot,
      title={{DDoShield-IoT}: A Testbed for Simulating and Lightweight Detection of {IoT} Botnet {DDoS} Attacks},
      author={Simona De Vivo and Islam Obaidat and Dong Dai and Pietro Liguori},
-     booktitle={54rd Annual IEEE/IFIP International Conference on Dependable Systems and Networks Workshops (DSN-W)},
+     booktitle={54th Annual IEEE/IFIP International Conference on Dependable Systems and Networks Workshops (DSN-W)},
      pages={1--8},
      year={2024}
    }
