@@ -337,7 +337,7 @@ def create():
     acc_status = 0
 
     # TServer
-    acc_status += process('docker run --platform linux/amd64 -v %s/docker/videos:/var/www/html/ --restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged -dit --net=none --name %s %s' % (dir_path, nameList[1], 'tserver'), None, 1)
+    acc_status += process('docker run --platform linux/amd64 -v "%s"/docker/videos:/var/www/html/ --restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged -dit --net=none --name %s %s' % (dir_path, nameList[1], 'tserver'), None, 1)
 
     # Attacker
     acc_status = process('docker run --platform linux/amd64 --restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged -dit --net=none --name %s %s' % (nameList[2], baseContainerNameAtt), None, 1)
@@ -347,7 +347,7 @@ def create():
 
     # Devs
     for x in range(numberOfOthers + 1, (numberOfNodes + 1)):
-        acc_status += process("docker run --platform linux/amd64 -v %s/docker/videos:/data/ --restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged -dit --net=none --name %s %s" % (dir_path, nameList[x], baseContainerNameDnsm), None, 0)
+        acc_status += process('docker run --platform linux/amd64 -v "%s"/docker/videos:/data/ --restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged -dit --net=none --name %s %s' % (dir_path, nameList[x], baseContainerNameDnsm), None, 0)
 
     # If something went wrong running the docker containers, we panic and exit
     check_return_code(acc_status, "Running docker containers")
@@ -460,7 +460,7 @@ def ns3(code = 0):
         ns3_cmd = tmp.format(jobs, str(numberOfNodes), total_emu_time, churn, ns3FileLog, writeDirectory, numberOfOthers)
 
     print("NS3_HOME=%s && %s"% ((os.environ['NS3_HOME']).strip(), ns3_cmd))
- 
+
     try:
         p = getpass.getpass(prompt='Sudo password:')
     except Exception as error:
@@ -562,7 +562,7 @@ def run_emu():
     print('Letting the simulation run for %s' % emulationTimeStr)
 
     if exec_code == 1:
-        proc1.communicate() # proc1.wait() 
+        proc1.communicate() # proc1.wait()
     else:
         if os.path.exists(pidsDirectory + "ns3"):
             with open(pidsDirectory + "ns3", "rt") as in_file:
