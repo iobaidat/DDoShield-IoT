@@ -601,14 +601,19 @@ def destroy():
             r_code = process("sudo modprobe -r ifb")
     print("DESTROYING ALL CONTAINERS")
 
-    r_containers = subprocess.check_output("docker ps -a -q", shell=True).decode('utf-8')
     r_code = 0
-    if r_containers:
-        r_containers = r_containers.strip().replace('\n',' ')
-        r_code = subprocess.call("docker stop %s && docker rm %s"%(r_containers, r_containers), shell=True)
-        check_return_code_chill(r_code, "Destroying ALL containers")
+    for x in range(1, numberOfNodes + 1):
+        r_code = process("docker stop %s && docker rm %s" % (nameList[x], nameList[x]), "Destroying container %s"%(nameList[x]), 0)
+        check_return_code_chill(r_code, "Destroying container %s"%(nameList[x]))
 
-    r_code = process("sudo /etc/init.d/docker restart")
+    # r_containers = subprocess.check_output("docker ps -a -q", shell=True).decode('utf-8')
+    # r_code = 0
+    # if r_containers:
+    #     r_containers = r_containers.strip().replace('\n',' ')
+    #     r_code = subprocess.call("docker stop %s && docker rm %s"%(r_containers, r_containers), shell=True)
+    #     check_return_code_chill(r_code, "Destroying ALL containers")
+
+    # r_code = process("sudo /etc/init.d/docker restart")
 
     docker_files = 0
     if os.path.exists(pidsDirectory):
