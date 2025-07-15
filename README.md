@@ -164,7 +164,7 @@ The framework consists of four main components:
     ```
 
 
-## Citing DDOShiedl-IoT
+## Citing DDOShield-IoT
 
 If you use DDoShield-IoT in your research, please consider citing our paper to acknowledge the work we've put into the project. You can find our paper at the following link:
 
