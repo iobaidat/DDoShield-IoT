@@ -39,9 +39,9 @@ RUN chmod +x /ftp_server.py /prep.sh
 
 # RUN apt-get install iperf # in the server run: iperf -s
 
-CMD /prep.sh
+CMD ["/prep.sh"]
 
-# CMD "/bin/bash"
+# CMD ["/bin/bash"]
 
 # docker system prune -a
 # DOCKER_BUILDKIT=1 docker build -t connman .

@@ -26,4 +26,4 @@ COPY kmeans_model.pkl /kmeans_model.pkl
 
 RUN chmod +x /ids-online.py /kmeans_model.pkl
 
-CMD "/bin/bash"
+CMD ["/bin/bash"]
