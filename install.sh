@@ -1,170 +1,336 @@
 #!/usr/bin/env bash
+# Install Docker, Docker Buildx, and ns-3 (plus requirements).
+# Quiet by default; pass -v or --verbose for step-by-step logs.
 
-function check_code() {
-    set -x; 
+set -Eeuo pipefail
 
-    if $1;
-    then
-        echo Success: $2
-    else
-        echo ERROR: Failed $2 1>&2
-        exit 1
-    fi
+# --------------------------- CLI & Logging ---------------------------
+usage() {
+  cat <<'EOF'
+Usage: install.sh [options]
 
-    set +x;
+Options:
+  -v, --verbose                 Verbose output
+      --no-ns3                  Skip ns-3 install/build
+      --no-docker               Skip Docker install
+      --no-buildx               Skip Docker Buildx install/check
+      --no-docker-ipv6          Do NOT write /etc/docker/daemon.json IPv6 config
+      --ns3-test                Build & run the simple ns-3 "first" example
+      --ns3-only                Only install/build ns-3
+      --docker-only             Only install Docker + Buildx
+
+  ns-3 controls:
+      --ns3-profile P           Build profile: optimized (default) or debug
+      --ns3-configure-only      Only ensure the right ns-3 version is present, then clean (configurable),
+                                re-configure & rebuild with the selected profile (no Docker steps)
+      --ns3-clean MODE          Cleaning mode before (re)configuring:
+                                  auto (default)  -> best-effort "ns3 clean" if tree exists
+                                  none            -> do not clean
+                                  clean           -> "./ns3 clean"
+                                  distclean       -> "./ns3 distclean"
+                              (ccache is not touched; manage separately if desired)
+
+Notes:
+- ns-3 version is read from network/ns3_version (relative to this script).
+- After Docker install, a reboot is required to use Docker without sudo.
+EOF
 }
 
-read NS3_VERSION < network/ns3_version
-
-echo -e "\n\n Updating enviroment... \n" 
-
-sudo apt-get update && sudo apt-get -y -q upgrade
-sudo apt-get -y -q dist-upgrade
-
-echo -e "\n\n Installing required packages ... \n" 
-sudo apt-get update
-
-check_code "sudo apt-get install -y -q net-tools gnupg gnupg2 wget curl ca-certificates lsb-release software-properties-common apt-transport-https g++ python3 python3-dev python3-setuptools pkg-config cmake ninja-build git python3-pip python-is-python3 autoconf cvs bzr unzip p7zip-full libc6-dev libclang-dev llvm-dev automake libffi-dev" "Installing required packages"
-
-
-echo -e "\n\n Installing Ns3 required packages ... \n" 
-# from https://www.nsnam.org/wiki/Installation
-
-check_code "sudo apt-get -y -q install ccache" "Installing Ns3 required packages"
-
-check_code "sudo apt-get install -y -q gdb valgrind clang-format clang-tidy uncrustify" "Installing Ns3 required packages"
-
-# sudo PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install --user cppyy 2> /dev/null
-
-check_code "sudo apt-get -y -q install cmake-format"
-
-check_code "sudo apt-get install -y -q qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools" "Installing Ns3 required packages"
-
-check_code "sudo apt-get install -y -q openmpi-bin openmpi-common openmpi-doc libopenmpi-dev" "Installing Ns3 required packages"
-
-check_code "sudo apt-get install -y -q mercurial" "Installing Ns3 required packages"
-
-check_code "sudo apt-get install -y -q doxygen graphviz imagemagick" "Installing Ns3 required packages"
-
-check_code "sudo apt-get install -y -q texlive texlive-extra-utils texlive-latex-extra texlive-font-utils dvipng latexmk" "Installing Ns3 required packages"
-
-check_code "sudo apt-get install -y -q python3-sphinx dia" "Installing Ns3 required packages"
-
-check_code "sudo apt-get install -y -q libeigen3-dev" "Installing Ns3 required packages"
-
-check_code "sudo apt-get install -y -q gsl-bin libgsl-dev libgslcblas0" "Installing Ns3 required packages"
-
-check_code "sudo apt-get install -y -q tcpdump" "Installing Ns3 required packages"
-
-sudo apt-get install -y -q sqlite 2> /dev/null
-
-check_code "sudo apt-get install -y -q sqlite3 libsqlite3-dev" "Installing Ns3 required packages"
-
-check_code "sudo apt-get install -y -q libgtk-3-dev" "Installing Ns3 required packages"
-
-check_code "sudo apt-get install -y -q vtun lxc uml-utilities ebtables bridge-utils" "Installing Ns3 required packages"
-
-check_code "sudo apt-get install -y -q libxml2 libxml2-dev libboost-all-dev" "Installing Ns3 required packages"
-
-check_code "sudo apt-get install -y -q gir1.2-goocanvas-2.0 python3-gi python3-gi-cairo python3-pygraphviz gir1.2-gtk-3.0 ipython3" "Installing Ns3 required packages"
-
-echo -e "\n\n Setting ns3 workspace ... \n" 
-
-# cd network/ && git clone https://gitlab.com/nsnam/ns-3-dev.git
-# cd ns-3-dev && ./ns3 clean
-# ./ns3 configure -d optimized --enable-sudo --disable-examples --disable-tests --disable-python
-# ./ns3
-
-cd network/
-
-check_code "wget https://www.nsnam.org/releases/ns-allinone-${NS3_VERSION}.tar.bz2" "Download NS3"
-
-tar xjf ns-allinone-${NS3_VERSION}.tar.bz2 && rm ns-allinone-${NS3_VERSION}.tar.bz2
-
-sudo chmod -R +x  *
-
-echo -e "\n\n compiling NS3 in optimized mode  ... \n"
-
-cd ns-allinone-${NS3_VERSION}
-
-check_code "./build.py --build-options= -- --enable-sudo --disable-examples --disable-tests --disable-python --build-profile=optimized" "Compile NS3"
-
-echo -e "\n\n Testing NS3 ... \n"
-
-cp ns-${NS3_VERSION}/examples/tutorial/first.cc ns-${NS3_VERSION}/scratch/
-
-check_code "./ns-${NS3_VERSION}/ns3" "Compile NS3 test code"
-
-check_code "./ns-${NS3_VERSION}/ns3 run first" "Run NS3 test code"
-
-rm ns-${NS3_VERSION}/scratch/first.cc
-
-cd ../..
-
-echo -e "\n\n Installing Docker required packages  ... \n"
-
-sudo apt-get remove containerd.io -y 2> /dev/null
-
-check_code "sudo apt-get install -y -q docker.io" "Installing Docker"
-
-check_code "sudo docker run hello-world" "Testing Docker"
-
-sudo groupadd docker 2> /dev/null
-
-sudo gpasswd -a $USER docker && sudo usermod -aG docker $USER
-
-/usr/bin/newgrp docker <<EONG
-
-sudo service docker restart
-
-echo -e "\n\n  Verifying  Docker  ... \n"
-docker run hello-world
-
-EONG
-
-echo -e "\n\n Installing Network Bridges  ... \n"
-
-check_code "sudo apt-get install -y -q bridge-utils " "Installing Network Bridges"
-
-check_code "sudo apt-get install -y -q uml-utilities" "Installing Network Bridges"
-
-echo -e "\n\n Enabling IPv6 Functionality for Docker  ... \n"
-
-echo -e "Creating /etc/docker/daemon.json ... \n"
-
-sudo touch /etc/docker/daemon.json
-
-printf '%s\n  %s\n  %s\n  %s\n%s' '{' '"ipv6": true,' '"fixed-cidr-v6": "2001:db8:1::/64",' '"experimental": true' '}' | sudo tee /etc/docker/daemon.json >> /dev/null
-
-echo -e "\n\n Enabling buildx Functionality for Docker  ... \n"
-
-check_code "sudo apt-get install -y qemu-user-static" "Installing Required Tools"
-
-sudo apt-get install -y -q binfmt-support 2> /dev/null
-
-check_code "qemu-x86_64-static --version" "Testing Support for Different Architectures"
-
-echo -e "\n\n Installing Docker buildx  ... \n"
-
-sudo apt-get install docker-buildx -y -q 2> /dev/null
-
-# /usr/bin/newgrp docker <<EONG
-
-# sudo service docker restart
-
-# DOCKER_BUILDKIT=1 docker build --platform=local -o . "https://github.com/docker/buildx.git"  1> /dev/null 2>& 1
-
-# EONG
-
-# mkdir -p ~/.docker/cli-plugins
-# mv buildx ~/.docker/cli-plugins/docker-buildx
-# sudo chmod a+x ~/.docker/cli-plugins/docker-buildx
-
-sudo service docker restart 2> /dev/null
-
-check_code "sudo docker buildx ls" "Checking Docker Buildx"
-
-echo -e "\n\n Everything is installed successfully  ... \n"
-
-GREEN='\033[0;32m'
-echo -e "\n\n  ${GREEN}Please reboot now  ... \n"
+VERBOSE=0
+DO_NS3=1
+DO_DOCKER=1
+DO_BUILDX=1
+WRITE_DOCKER_IPV6=1
+RUN_NS3_TEST=0
+NS3_BUILD_PROFILE="optimized"     # optimized|debug
+NS3_CONFIGURE_ONLY=0
+NS3_CLEAN_MODE="auto"             # auto|none|clean|distclean
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -v|--verbose) VERBOSE=1; shift ;;
+    --no-ns3) DO_NS3=0; shift ;;
+    --no-docker) DO_DOCKER=0; shift ;;
+    --no-buildx) DO_BUILDX=0; shift ;;
+    --no-docker-ipv6) WRITE_DOCKER_IPV6=0; shift ;;
+    --ns3-test) RUN_NS3_TEST=1; shift ;;
+    --ns3-only) DO_NS3=1; DO_DOCKER=0; DO_BUILDX=0; shift ;;
+    --docker-only) DO_NS3=0; DO_DOCKER=1; DO_BUILDX=1; shift ;;
+    --ns3-profile) NS3_BUILD_PROFILE="${2:-optimized}"; shift 2 ;;
+    --ns3-configure-only) NS3_CONFIGURE_ONLY=1; DO_NS3=1; DO_DOCKER=0; DO_BUILDX=0; shift ;;
+    --ns3-clean) NS3_CLEAN_MODE="${2:-auto}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1"; usage; exit 2 ;;
+  esac
+done
+
+if [[ "$NS3_BUILD_PROFILE" != "optimized" && "$NS3_BUILD_PROFILE" != "debug" ]]; then
+  echo "[ERROR] --ns3-profile must be 'optimized' or 'debug'." >&2
+  exit 2
+fi
+case "$NS3_CLEAN_MODE" in auto|none|clean|distclean) ;; *) echo "[ERROR] --ns3-clean must be auto|none|clean|distclean."; exit 2;; esac
+
+C_GREEN="$(tput setaf 2 2>/dev/null || true)"
+C_YEL="$(tput setaf 3 2>/dev/null || true)"
+C_RED="$(tput setaf 1 2>/dev/null || true)"
+C_DIM="$(tput dim 2>/dev/null || true)"
+C_RST="$(tput sgr0 2>/dev/null || true)"
+
+log() {
+  if [[ "${VERBOSE:-0}" -eq 1 ]]; then
+    echo "[$(date +%H:%M:%S)] $*"
+  fi
+  return 0    # <- ensure success even when VERBOSE!=1
+}
+info() { echo "${C_GREEN}[INFO]${C_RST} $*"; }
+warn() { echo "${C_YEL}[WARN]${C_RST} $*"; }
+fail() { echo "${C_RED}[ERROR]${C_RST} $*" >&2; exit 1; }
+
+trap 'echo "'"${C_RED}[ERROR]${C_RST}"' install.sh failed at ${BASH_SOURCE[0]}:${LINENO}: ${BASH_COMMAND}" >&2' ERR
+echo "${C_GREEN}[INFO]${C_RST} install.sh starting (verbose=${VERBOSE})"
+
+# Resolve paths relative to this script (so you can run from any cwd)
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)"
+
+# Make apt noninteractive
+export DEBIAN_FRONTEND=noninteractive
+
+as_root() { if [[ $EUID -ne 0 ]]; then sudo -H bash -lc "$1"; else bash -lc "$1"; fi; }
+
+run() {
+  # run "cmd..." [label]
+  local cmd="$1"; local label="${2:-$1}"
+  log "Running: $cmd"
+  if ! bash -lc "$cmd"; then
+    fail "Failed: ${label}"
+  fi
+}
+
+apt_update_retry() {
+  local tries=3
+  for i in $(seq 1 $tries); do
+    if as_root "apt-get update -qq"; then return 0; fi
+    sleep 3
+  done
+  fail "apt-get update failed after ${tries} attempts"
+}
+
+apt_install() {
+  [[ $# -eq 0 ]] && return 0
+  local pkglist; pkglist="$(printf '%s ' "$@")"
+  as_root "apt-get -o Dpkg::Use-Pty=0 install -y -qq ${pkglist}"
+}
+
+# Return 0 if package is installed, else 1 (quiet)
+pkg_installed() { dpkg -s "$1" >/dev/null 2>&1; }
+
+# Remove a package only if it exists; keep output clean
+quiet_remove_pkg() {
+  local pkg="$1"
+  if pkg_installed "$pkg"; then
+    info "Removing '$pkg' (to avoid conflicts)..."
+    as_root "apt-get remove -y -qq '$pkg' >/dev/null 2>&1 || true"
+  else
+    info "No '$pkg' installed; skipping removal."
+  fi
+}
+
+# --------------------------- Sanity checks ---------------------------
+command -v apt-get >/dev/null || fail "Debian/Ubuntu required (apt-get not found)."
+command -v sudo >/dev/null || fail "sudo is required."
+
+# --------------------------- Base packages ---------------------------
+info "Updating package index & installing base tools..."
+apt_update_retry
+apt_install ca-certificates gnupg gnupg2 lsb-release software-properties-common apt-transport-https wget curl
+apt_install g++ build-essential python3 python3-dev python3-setuptools python3-pip python-is-python3 \
+            pkg-config cmake ninja-build git autoconf automake unzip p7zip-full libc6-dev libclang-dev llvm-dev libffi-dev
+
+# --------------------------- ns-3 helpers ---------------------------
+# Locate requested version (from file), prepare ROOT_DIR/CORE_DIR/NS3_TOOL
+ns3_resolve() {
+  local ns3_file="${SCRIPT_DIR}/network/ns3_version"
+  [[ -f "$ns3_file" ]] || fail "Missing ${ns3_file} (e.g., '3.45')."
+  NS3_VERSION="$(tr -d ' \t\r\n' < "$ns3_file" || true)"
+  [[ -n "${NS3_VERSION:-}" ]] || fail "ns3_version file exists but is empty. Put e.g. '3.45' inside."
+
+  ROOT_DIR="ns-allinone-${NS3_VERSION}"
+  CORE_DIR="${ROOT_DIR}/ns-${NS3_VERSION}"
+  NS3_TOOL="${CORE_DIR}/ns3"
+
+  # If tool not found yet, try locating it under the tree (handles minor layout drifts)
+  if [[ ! -x "$NS3_TOOL" && -d "$ROOT_DIR" ]]; then
+    NS3_TOOL="$(find "${ROOT_DIR}" -maxdepth 3 -type f -name ns3 -print -quit || true)"
+    [[ -n "$NS3_TOOL" ]] && CORE_DIR="$(dirname "$NS3_TOOL")"
+  fi
+}
+
+# Download the required version if needed
+ns3_fetch_if_missing() {
+  pushd "${SCRIPT_DIR}/network" >/dev/null
+  if [[ ! -d "$ROOT_DIR" ]]; then
+    local tar="ns-allinone-${NS3_VERSION}.tar.bz2"
+    run "wget -q https://www.nsnam.org/releases/${tar}" "Download ns-3 ${NS3_VERSION}"
+    run "tar xjf ${tar}" "Extract ns-3 ${NS3_VERSION}"
+    rm -f "${tar}"
+  else
+    log "${ROOT_DIR} already present; skipping download"
+  fi
+  as_root "chmod -R +x '${ROOT_DIR}' || true"
+  popd >/dev/null
+}
+
+# Clean depending on mode
+ns3_clean() {
+  [[ ! -d "${SCRIPT_DIR}/network/${CORE_DIR}" ]] && { log "ns-3 core dir not present; skipping clean"; return 0; }
+  pushd "${SCRIPT_DIR}/network/${CORE_DIR}" >/dev/null
+  case "$NS3_CLEAN_MODE" in
+    none) log "Skipping ns-3 clean (mode=none)";;
+    clean)      run "./ns3 clean || true" "ns-3 clean";;
+    distclean)  run "./ns3 distclean || true" "ns-3 distclean";;
+    auto)       run "./ns3 clean || true" "ns-3 clean (auto)";;
+  esac
+  popd >/dev/null
+}
+
+# Configure & build with selected profile
+ns3_configure_build() {
+  pushd "${SCRIPT_DIR}/network/${CORE_DIR}" >/dev/null
+  info "Configuring & building ns-3 via ./ns3 (profile=${NS3_BUILD_PROFILE})..."
+  run "./ns3 configure --enable-sudo --disable-examples --disable-tests --disable-python --build-profile=${NS3_BUILD_PROFILE}" \
+      "ns-3 configure"
+  run "./ns3 build" "ns-3 build"
+  if [[ $RUN_NS3_TEST -eq 1 ]]; then
+    log "Running ns-3 sanity test (first.cc) via ./ns3 ..."
+    cp "examples/tutorial/first.cc" "scratch/" || true
+    run "./ns3 build" "ns-3 rebuild with scratch"
+    run "./ns3 run first" "Run ns-3 'first' example"
+    rm -f "scratch/first.cc" || true
+  fi
+  popd >/dev/null
+}
+
+# --------------------------- ns-3 (install or configure-only) -------
+if [[ $DO_NS3 -eq 1 ]]; then
+  info "Installing ns-3 toolchain & dependencies..."
+  apt_install ccache gdb valgrind clang-format clang-tidy uncrustify cmake-format
+  apt_install qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools
+  apt_install openmpi-bin openmpi-common openmpi-doc libopenmpi-dev
+  apt_install mercurial doxygen graphviz imagemagick
+  apt_install texlive texlive-extra-utils texlive-latex-extra texlive-font-utils dvipng latexmk
+  apt_install python3-sphinx dia libeigen3-dev gsl-bin libgsl-dev libgslcblas0
+  apt_install tcpdump sqlite3 libsqlite3-dev libgtk-3-dev
+  apt_install vtun lxc uml-utilities ebtables bridge-utils
+  apt_install libxml2 libxml2-dev libboost-all-dev
+  apt_install gir1.2-goocanvas-2.0 python3-gi python3-gi-cairo python3-pygraphviz gir1.2-gtk-3.0 ipython3
+
+  info "Ensuring ns-3 workspace matches version file..."
+  run "mkdir -p '${SCRIPT_DIR}/network'"
+  ns3_resolve
+
+  pushd "${SCRIPT_DIR}/network" >/dev/null
+  # If a different ns-allinone-* exists that doesn't match, we won't delete it,
+  # we simply fetch the required version dir and build there.
+  ns3_fetch_if_missing
+
+  # Refresh paths in case we just downloaded
+  ns3_resolve
+  [[ -x "${NS3_TOOL}" ]] || fail "Could not find executable 'ns3' tool under ${ROOT_DIR}"
+
+  # Clean per mode (safe on both pre/post-build trees thanks to '|| true')
+  ns3_clean
+  ns3_configure_build
+  popd >/dev/null
+fi
+
+# --------------------------- Docker ---------------------------------
+if [[ $DO_DOCKER -eq 1 ]]; then
+  info "Installing Docker Engine..."
+  quiet_remove_pkg containerd.io
+  apt_update_retry
+  apt_install docker.io
+
+  info "Enabling & starting Docker..."
+  as_root "systemctl enable --now docker || service docker start || true"
+
+  info "Verifying Docker with hello-world (sudo run)..."
+  run "sudo docker run --rm hello-world" "Docker hello-world"
+
+  # Add current user to docker group
+  as_root "groupadd -f docker"
+  TARGET_USER="${SUDO_USER:-$USER}"
+  as_root "usermod -aG docker $TARGET_USER"
+
+  if [[ $WRITE_DOCKER_IPV6 -eq 1 ]]; then
+    info "Writing /etc/docker/daemon.json (IPv6 enabled; backup preserved)..."
+    as_root 'mkdir -p /etc/docker; [[ -f /etc/docker/daemon.json ]] && cp /etc/docker/daemon.json /etc/docker/daemon.json.bak.$(date +%s) || true'
+    as_root 'cat > /etc/docker/daemon.json <<JSON
+{
+  "ipv6": true,
+  "fixed-cidr-v6": "2001:db8:1::/64",
+  "experimental": true
+}
+JSON'
+    as_root "systemctl restart docker || service docker restart || true"
+  else
+    warn "Skipping Docker IPv6 daemon.json as requested (--no-docker-ipv6)."
+  fi
+fi
+
+# --------------------------- Buildx ---------------------------------
+if [[ $DO_DOCKER -eq 1 && $DO_BUILDX -eq 1 ]]; then
+  info "Installing Buildx prerequisites (qemu/binfmt)..."
+  apt_update_retry
+  apt_install qemu-user-static
+  as_root "apt-get install -y -qq binfmt-support || true"
+  run "qemu-x86_64-static --version" "qemu multi-arch check"
+
+  info "Installing Docker Buildx..."
+  apt_update_retry
+  # Prefer 'docker-buildx' package; fall back to plugin name
+  if as_root "apt-get install -y -qq docker-buildx"; then
+    log "Installed package: docker-buildx"
+  elif as_root "apt-get install -y -qq docker-buildx-plugin"; then
+    log "Installed package: docker-buildx-plugin"
+  else
+    warn "Neither 'docker-buildx' nor 'docker-buildx-plugin' available from APT. Buildx may already be bundled with Docker. Continuing."
+  fi
+
+  as_root "systemctl restart docker || service docker restart || true"
+
+  info "Checking Docker Buildx..."
+  if ! docker buildx version >/dev/null 2>&1; then
+    if ! docker buildx ls >/dev/null 2>&1; then
+      warn "Docker Buildx not detected. If you need it, install from your distro or Docker’s official repo."
+    fi
+  fi
+fi
+
+# --------------------------- Summary --------------------------------
+echo
+info "Installation finished."
+echo "${C_DIM}- ns-3:         ${DO_NS3:+installed/configured}${DO_NS3:+" (see ./network/ns-allinone-<ver>)"}${C_RST}"
+echo "${C_DIM}- ns-3 profile:  ${NS3_BUILD_PROFILE}${C_RST}"
+echo "${C_DIM}- ns-3 mode:     ${NS3_CONFIGURE_ONLY:+configure-only}${NS3_CONFIGURE_ONLY:-install/build}${C_RST}"
+echo "${C_DIM}- ns-3 clean:    ${NS3_CLEAN_MODE}${C_RST}"
+echo "${C_DIM}- Docker:       ${DO_DOCKER:+installed}${C_RST}"
+echo "${C_DIM}- Buildx:       ${DO_BUILDX:+installed}${C_RST}"
+[[ $DO_DOCKER -eq 1 && $WRITE_DOCKER_IPV6 -eq 1 ]] && echo "${C_DIM}- Docker IPv6:  enabled (daemon.json written; backup saved)${C_RST}"
+echo
+
+# Require reboot if Docker was installed and current user can't use it yet
+if [[ $DO_DOCKER -eq 1 ]]; then
+  AUTO_REBOOT="${AUTO_REBOOT:-0}"
+  TARGET_USER="${SUDO_USER:-$USER}"
+  if ! sudo -iu "$TARGET_USER" bash -lc 'docker version >/dev/null 2>&1'; then
+    echo
+    echo "${C_RED}[ACTION REQUIRED]${C_RST} Docker non-root access for '${TARGET_USER}' is not active."
+    echo "  ${C_GREEN}Reboot now${C_RST} to finish setup."
+    echo
+    if [[ "$AUTO_REBOOT" == "1" ]]; then
+      info "Auto-reboot enabled — rebooting now..."
+      as_root "reboot"
+    fi
+    exit 0
+  fi
+fi
