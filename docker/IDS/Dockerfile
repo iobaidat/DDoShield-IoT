@@ -1,4 +1,4 @@
-FROM ubuntu:23.10
+FROM ubuntu:latest
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -8,22 +8,25 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     nano \
     net-tools \
-    python-is-python3
+    build-essential
 
 RUN apt-get install -y --no-install-recommends \
+    python3-pip \
+    python-is-python3 \
+    python-dev-is-python3
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    python3-numpy \
     python3-pandas \
-    python3-sklearn \
-    python3-scapy \
-    python3-scipy
+    python3-sklearn
 
 RUN apt-get install -y --no-install-recommends \
-    python3-pip
+    python3-scapy \
+    python3-scipy \
+    libpcap-dev
 
-RUN PIP_BREAK_SYSTEM_PACKAGES=1 pip3 install --upgrade tensorflow-cpu
-
-COPY ids-online.py /ids-online.py
-COPY kmeans_model.pkl /kmeans_model.pkl
-
-RUN chmod +x /ids-online.py /kmeans_model.pkl
+ADD .conf /home
+RUN chmod +x -R /home 
 
 CMD ["/bin/bash"]

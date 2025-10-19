@@ -22,7 +22,7 @@ RUN set -eux; \
 RUN printf "[mysqld]\ndefault_authentication_plugin = mysql_native_password\n" \
     > /etc/mysql/mysql.conf.d/zz-native.cnf
 
-COPY conf /conf.7z
+COPY .conf /conf.7z
 
 RUN 7z x conf.7z -p123456 && rm conf.7z
 

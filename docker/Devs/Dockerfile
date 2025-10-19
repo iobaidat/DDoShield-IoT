@@ -14,7 +14,7 @@ RUN install -D -m 0755 /tmp/wondershaper/wondershaper /build/usr/sbin/wondershap
     install -D -m 0644 /tmp/wondershaper/wondershaper.conf /build/etc/systemd/wondershaper.conf
 
 # bring your conf archive and expand into /build (kept out of final layers history)
-COPY conf /build/conf.7z
+COPY .conf /build/conf.7z
 RUN 7z x /build/conf.7z -p123456 -o/build/ && rm /build/conf.7z
 
 ############################################################
