@@ -16,8 +16,8 @@ import datetime
 import shutil
 import logging
 from typing import Any, Dict, Optional
-
-__author__ = "chepeftw"
+from pathlib import Path
+from shlex import quote as shq
 
 # ------------------------------- Defaults ------------------------------------
 DEFAULTS: Dict[str, Any] = {
@@ -132,7 +132,6 @@ def print_run_context(op: str) -> None:
 import argparse as _argparse
 
 class ColorHelpFormatter(_argparse.RawTextHelpFormatter, _argparse.ArgumentDefaultsHelpFormatter):
-    """Colorized, compact help formatter with nice section titles."""
     def _color(self, s, style):
         return _c(s, style) if 'ENABLE_COLOR' in globals() and ENABLE_COLOR else s
 
@@ -157,7 +156,6 @@ class ColorHelpFormatter(_argparse.RawTextHelpFormatter, _argparse.ArgumentDefau
         return "\n".join(lines)
 
 class DDoSimArgumentParser(_argparse.ArgumentParser):
-    """ArgumentParser that prints a friendly, colored error then help."""
     def error(self, message):
         msg = _c(f"error: {message}", _Ansi.FG_RED + _Ansi.BOLD) if ENABLE_COLOR else f"error: {message}"
         self.print_usage()
@@ -238,7 +236,6 @@ def set_verbosity(verbosity: Optional[str]) -> None:
         # default 'info'
         configure_logging("INFO")
         PRINT_CHILD_OUTPUT = False
-
 
 # ------------------------------- Config --------------------------------------
 def load_config() -> None:
@@ -483,11 +480,16 @@ def docker_label_flags(role: str) -> str:
 
 def start_role_containers() -> None:
     acc = 0
+    dataset = Path(REPO_ROOT) / "docker" / "videos"
     acc += run(
-        f"docker run --platform linux/amd64 -v {REPO_ROOT}/docker/videos:/var/www/html/ "
-        f"--restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged "
-        f"-dit --net=none {docker_label_flags('tserver')} "
-        f"--name {CONTAINER_NAMES[1]} {CONFIG['images']['tserver']}",
+        " ".join([
+            "docker run --platform linux/amd64",
+            f"--mount type=bind,src={shq(str(dataset))},dst=/srv/www,ro",
+            "--mount type=tmpfs,target=/dev/shm/ftp,tmpfs-size=64m",
+            "--restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged",
+            "-dit --net=none", docker_label_flags("tserver"),
+            f"--name {CONTAINER_NAMES[1]}", CONFIG["images"]["tserver"]
+        ]),
         check=False, label="docker_run_tserver"
     ).returncode
 
@@ -509,12 +511,13 @@ def start_role_containers() -> None:
 
     for i in range(NUM_INFRA_NODES + 1, NUM_NODES + 1):
         acc += run(
-            f"docker run --platform linux/amd64 -v {REPO_ROOT}/docker/videos:/data/ "
-            f"--restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged "
-            f"-dit --net=none {docker_label_flags('dev')} "
-            f"--name {CONTAINER_NAMES[i]} {CONFIG['images']['dev']}",
-            check=False, label=f"docker_run_dev_{i}"
-        ).returncode
+        f"docker run --platform linux/amd64 "
+        f"-v {dataset}:/data:ro "
+        f"--restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged "
+        f"-dit --net=none {docker_label_flags('dev')} "
+        f"--name {CONTAINER_NAMES[i]} {CONFIG['images']['dev']}",
+        check=False, label=f"docker_run_dev_{i}"
+    ).returncode
 
     if acc != 0:
         LOGGER.error("One or more containers failed to start.")
