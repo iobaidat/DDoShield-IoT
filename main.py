@@ -615,6 +615,13 @@ def run_ns3(return_proc: bool = False):
 
     LOGGER.info("About to start ns-3 with total emulation time of %s", EMULATION_TIME_SEC)
 
+    # docker run --cap-add=NET_ADMIN \
+    #   -v /path/to/videos:/data \
+    #  -e SERVER_IP=10.0.0.1 \
+    #  -e BW_RERANDOMIZE=true -e BW_RERANDOMIZE_MINUTES=10
+    #  -e PAUSE_BETWEEN_FILES=true -e PAUSE_MAX_SECS=3
+    #  -e APP_CMD=run_ffmpeg #(or run_curl_http, run_curl_ftp)
+
     base = "cd $NS3_HOME && "
     if NETWORK_TYPE == "wifi":
         ns3_cmd = (

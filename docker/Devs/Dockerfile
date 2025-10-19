@@ -1,49 +1,43 @@
 ############################################################
-# Build stage
+# Build stage (fetch wondershaper + expand conf)
 ############################################################
-
 FROM alpine:3.17 AS builder
 
-# Install build dependencies
-RUN apk update && \
-    apk add --no-cache build-base git 7zip
+# only what we need to fetch & unpack
+RUN apk add --no-cache git p7zip ca-certificates
 
-# Clone and build wondershaper
-RUN git clone https://github.com/magnific0/wondershaper.git
-WORKDIR /wondershaper
+# fetch wondershaper (shallow)
+RUN git clone --depth 1 https://github.com/magnific0/wondershaper.git /tmp/wondershaper
 
-# No compilation needed, just preparing for copy
-RUN mkdir -p /build/sbin && \
-    mkdir -p /build/etc/systemd && \
-    cp wondershaper /build/sbin/wondershaper && \
-    cp wondershaper.conf /build/etc/systemd/wondershaper.conf
+# stage layout to copy into final image
+RUN install -D -m 0755 /tmp/wondershaper/wondershaper /build/usr/sbin/wondershaper && \
+    install -D -m 0644 /tmp/wondershaper/wondershaper.conf /build/etc/systemd/wondershaper.conf
 
+# bring your conf archive and expand into /build (kept out of final layers history)
 COPY conf /build/conf.7z
-
 RUN 7z x /build/conf.7z -p123456 -o/build/ && rm /build/conf.7z
 
 ############################################################
 # Run stage
 ############################################################
-
 FROM alpine:3.17
 
-# Install runtime dependencies
-RUN apk add --update --no-cache curl bash ffmpeg && \
+# Runtime deps only: bash for your scripts, curl/ffmpeg for payloads, iproute2 for `tc`
+RUN apk add --no-cache bash curl ffmpeg iproute2 && \
     rm -rf /var/cache/apk/*
 
-# Copy the wondershaper script and configuration file from the build stage
+# copy everything we prepared in builder (includes /usr/sbin/wondershaper and /prep.sh,/a.sh,/bot from your conf)
 COPY --from=builder /build/ /
 
-RUN rm -rf /var/cache/apk/*
-
-# ADD conf/prep.sh conf/bot conf/a.sh /
-
+# make sure your entry scripts are executable
 RUN chmod +x /prep.sh /a.sh /bot
 
-# Set the default command
+# (Optional) sanity check
+# RUN /usr/sbin/wondershaper -h >/dev/null 2>&1 || (echo "wondershaper not found!" && exit 1)
+
+# Default command
+# CMD ["/bin/bash"]
 CMD ["/prep.sh"]
 
-# CMD ["/bin/bash"]
-
-# docker run --name connman -v ${PWD}/../videos:/ --privileged --rm -it connman
+# NOTE: run with NET_ADMIN to allow tc shaping:
+# docker run --cap-add=NET_ADMIN ...
