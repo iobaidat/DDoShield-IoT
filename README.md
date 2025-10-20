@@ -206,6 +206,51 @@ ack 10.0.0.1 2 dport=22
 
 ---
 
+> ### Capturing PCAPs (Wireshark or tcpdump)
+> You can capture traffic from any node in the testbed for analysis. Install tools on the **host**:
+>
+> ```bash
+> sudo apt-get install -y wireshark tcpdump
+> ```
+>
+> **Node naming cheat-sheet**
+> - `emu1` = TServer (target)
+> - `emu2` = Attacker (C&C)
+> - `emu3` = IDS
+> - `emu4` and above = IoT devices (e.g., with `-d 2`, devices are `emu4`, `emu5`)
+>
+> #### Option A — Wireshark (GUI)
+> 1) Open **Wireshark** on the host.
+> 2) Select the interface named **`si-emuN`** for the node you want to monitor  
+>    (e.g., **`si-emu3`** to monitor all packets delivered to the IDS).
+> 3) Click **Start**. When done, **File → Save As…** to export a **.pcap**.
+>
+> #### Option B — tcpdump (CLI, host-side)
+> Use this one-liner to capture on the **host interface** that corresponds to a container’s `eth0`.
+> It writes a timestamped **.pcap** in the current directory.
+>
+> ```bash
+> # Example: capture for the IDS (emu3)
+> cid=emu3; sudo tcpdump -i "$(ip -o link | awk -F': ' -v idx=$(docker exec "$cid" cat /sys/class/net/eth0/iflink) '$1==idx {split($2,a,\"@\"); print a[1]}')" \
+>   -s0 -n -w "${cid}_$(date +%s).pcap"
+> ```
+>
+> - Similar to Wireshark, to capture the **Attacker** use `cid=emu2`, for the **TServer** use `cid=emu1`, etc.
+> - Press **Ctrl+C** to stop. The PCAP is saved in your current directory.
+>
+> **Tips**
+> - Limit duration or rotate files to avoid large captures:
+>   ```bash
+>   # 60-second chunks, keep 5 files max (rotating), full packets, no DNS lookups
+>   cid=emu3; sudo tcpdump -i "$(ip -o link | awk -F': ' -v idx=$(docker exec "$cid" cat /sys/class/net/eth0/iflink) '$1==idx {split($2,a,\"@\"); print a[1]}')" \
+>     -s0 -n -G 60 -W 5 -w "${cid}_%Y%m%d-%H%M%S.pcap"
+>   ```
+> - Verify a capture: open in Wireshark or run `capinfos <file>.pcap`.
+> - If your distro restricts GUI capture without root, add your user to the `wireshark` group and re-log, or run Wireshark/tcpdump with `sudo`.
+
+
+---
+
 ## Tips & Troubleshooting
 
 * **“permission denied” on docker** → Reboot after install so your user is in the `docker` group.
