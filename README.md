@@ -1,47 +1,48 @@
 # DDoShield-IoT
 **Testbed for Evaluating IDS Performance against Botnet Distributed Denial of Service Attacks in IoT Environments**
 
-DDoShield‑IoT is an open‑source testbed for researching and evaluating IDS performance against IoT botnet DDoS attacks. It orchestrates Docker containers (attacker, IoT devices, IDS, and target server) and connects them through an ns‑3 emulated network.
+DDoShield-IoT is an open-source testbed to **simulate IoT botnet DDoS traffic**, **run ML-based IDS in real time**, and **evaluate detection quality** in a controlled, reproducible environment. It orchestrates Docker containers (Attacker, Devs, IDS, Target Server) and connects them over an **ns-3** emulated network so you can vary topology, delay, loss, bottlenecks, and bandwidth.
+
+<p align="center">
+<img alt="DDoShield-IoT Overview" src="DDoShield-IoT.png" width="70%">
+</p>
 
 ---
 
-## Quickstart (2 commands)
-```bash
-# 1) Install dependencies (show progress), then REBOOT
-./install.sh -v
-
-# 2) First run (show progress while Docker images build)
-./main.py -d 2 -V debug create
-```
-> After the first run, you can omit `-V debug` (default output is concise).
-
----
-
-## Prerequisites
+## Requirements
 - OS: **Ubuntu 22.04/24.04** or **Debian 12**
-- Privileges: **sudo** required for installation
-- Hardware: **≥ 4 CPU cores**, **≥ 8 GB RAM** (16 GB+ recommended), **≥ 20 GB** free disk
-- Internet access to fetch ns‑3 release tarball and Docker images
+- Hardware: ≥ **4 CPU cores**, **8 GB RAM** (16 GB+ recommended), **25 GB** free disk
+- Internet access during install
+- Sudo privileges (installer will prompt where needed)
+
+---
+
+## Download & Install
+The following downloads DDoShield-IoT and sets up Docker, Docker Buildx, and ns‑3 (version pinned in `network/ns3_version`).
+
+```bash
+# 1) Install git.
+sudo apt-get install -y git
+
+# 2) Clone the DDoShield-IoT repository.
+cd ~ && git clone https://github.com/iobaidat/DDoShield-IoT.git
+
+# 3) Change the permissions of the files in the downloaded repository (add execute permissions to files in DDoShield-IoT).
+sudo chmod +x -R DDoShield-IoT/
+
+# 4) Navigate to the downloaded repository.
+cd ~/DDoShield-IoT
+
+# 4) Install dependencies (show progress). Do NOT prefix with sudo.
+./install.sh -v
+````
 
 > **Important:** After `./install.sh` completes, **reboot the machine** before running `main.py`. Docker non‑root access is not active until after a reboot.
-
----
-
-## Installation
-The installer sets up **Docker**, **Docker Buildx**, and **ns‑3** (version pinned in `network/ns3_version`).
-
-```bash
-# See progress
-./install.sh -v
-
-# Show all installer options
-./install.sh -h
-```
 
 ### Notable installer options
 - `--ns3-only` / `--docker-only` – install only one side
 - `--ns3-profile {optimized|debug}` – choose ns‑3 build profile (default: `optimized`)
-- `--ns3-configure-only` – ensure the exact version in `network/ns3_version` is present, then (optionally) clean, **reconfigure**, and **rebuild**
+- `--ns3-configure-only` – ensure the exact version in `network/ns3_version` is present, then (optionally) clean, reconfigure, and rebuild
 - `--ns3-clean {auto|none|clean|distclean}` – cleaning strategy before configure (default: `auto`)
 
 Examples:
@@ -52,125 +53,178 @@ Examples:
 # Reconfigure/rebuild with full clean (debug)
 ./install.sh --ns3-configure-only --ns3-clean distclean --ns3-profile debug
 ```
-
 ---
 
-## Using the Testbed
+## Usage: Full Workflow
 
-### CLI help
+### 1) Navigate to DDoShield-IoT repository
+
+```bash
+cd ~/DDoShield-IoT
+```
+
+### 2) CLI help
+
 ```bash
 ./main.py --help
 ```
 
-### Create environment
-```bash
-# First run: show detailed progress
-./main.py -d <devs> -V debug create
+### 3) Create nodes
+To Create a specific number of Devs (i.e., IoT Devices), use the following command:
 
-# Later runs (quieter):
-./main.py -d <devs> create
+```bash
+./main.py -d <N> -V debug create
+# examples: create 2 device
+./main.py -d 3 -V debug create
 ```
 
-### Start ns‑3 emulation
+> **Note — First Run Takes Longer**
+> The very first `./main.py -d <N> create` (optionally with `-V debug`) can take a while
+> because Docker builds all node images (Attacker, Devs, TServer, IDS) and pulls base
+> layers. Subsequent runs are **much faster** thanks to Docker layer caching.
+>
+> Tips:
+> - Use `-V debug` once to see build progress (e.g., `./main.py -d 2 -V debug create`).
+>   After the first run you can omit `-V debug` (default output is concise).
+> - Check disk usage with `docker system df`.
+> - To reclaim space later: `docker system prune -a` (removes **unused** images, **stopped**
+>   containers, unused networks, and build cache). After pruning, the next
+>   `./main.py -d <N> create` will rebuild images again from scratch and take longer.
+
+### 4) Start the ns-3 network
+
 ```bash
-./main.py -d <devs> ns3
+./main.py -d <N> -V debug ns3
+# examples:
+./main.py -d 3 -V debug ns3
 ```
 
-### Destroy environment
+This creates bridges/taps, attaches containers, configures the simulator, and starts emulation. The target server (TServer) is reachable at **10.0.0.1** by default.
+
+### 5) Run the IDS (real time)
+
+Open a **new terminal** (second terminal) and attach to the IDS container (named `emu3`):
+
 ```bash
-# Safe tear‑down (honors labels; see below)
-./main.py -d <devs> destroy
+docker exec -it emu3 bash
 ```
 
-### Verbosity (main.py)
-- `-V quiet` – minimal output (default)
-- `-V info` – key steps
-- `-V verbose` – detailed steps
-- `-V debug` – everything (recommended for first run)
+Start the online IDS with:
 
-Colorized output can be controlled with `--color {auto,always,never}`.
+```bash
+./home/ids-online-predict.py --bundle /home/ids-model-bundle --duration 180
+```
 
----
+* `--bundle` → path to the deployed model bundle
+* `--duration` → total run time (seconds)
 
-## Components
-- **Attacker** – tools/scripts for exploiting/controlling Devs
-- **Devs** – N emulated IoT devices
-- **TServer** – sink/target server for DDoS traffic
-- **IDS** – real‑time IDS container (ML models) with traffic mirroring
+Once you start the IDS, you should see the IDS traffic classification output.
 
----
+> **Model training pipeline** is in the repo at:
+>
+> `DDoShield-IoT/docker/IDS/model_train_pipeline`
 
-## Labels & Safe Cleanup
-All containers are labeled to avoid touching unrelated host containers:
-- `ddosim.project=<project>`
-- `ddosim.role=<role>`
-- `ddosim.run_id=<run-id>`
+### 6) Launch attacks from the C&C (Attacker)
 
-`destroy` respects `--destroy-scope {project,run,all}` to control cleanup scope.
+Open **another terminal** (third terminal) and attach to the Attacker container (named `emu2`):
 
----
+```bash
+docker exec -it emu2 bash
+```
 
-## Logs & Artifacts
-- Run logs: `results/logs/<run_id>/`
-- ns‑3 sources/build: `network/ns-allinone-<ver>/ns-<ver>/`
-- Docker cache size: `docker system df`  
-- (Optional) prune old images/containers once you’re done: `docker system prune -a`
+Then open the C&C Server:
+```bash
+telnet localhost
+# Credentials:
+#   user: root
+#   pass: root
+```
 
----
+To launch an attack, make sure that Devs are connected to the C&C Server. You can see the number of bots in the title bar of the terminal running the C&C Server. Type the attack command in the C&C server's terminal. Run attacks (examples):
 
-## Typical Workflow
-1. **Install**: `./install.sh -v` → **REBOOT**
-2. **Create**: `./main.py -d 2 -V debug create`
-3. **Start ns‑3**: `./main.py -d 2 ns3`
-4. **Attach to IDS** (example):
-   ```bash
-   docker exec -it emu3 bash
-   ./ids-online.py
-   ```
-5. **Run attacks** from attacker/C&C (TServer is `10.0.0.1`)
-6. **Destroy** when done: `./main.py -d 2 destroy`
+```text
+udp 10.0.0.1 2 dport=9
+syn 10.0.0.1 2 dport=9
+ack 10.0.0.1 2 dport=9
+```
+* `udp`, `udp`, and `udp` → three different attacks
+* `10.0.0.1` → the IP address of our target (TServer)
+* `2` → is the attack duration in seconds
+* `dport` → destination port number (target a specific port in TServer)
 
----
+> See supported attacks: [attack-instructions](attack-instructions.md)
 
-## ns‑3 Cleaning (reference)
-From `./ns3` tool:
-- `./ns3 clean` – remove CMake/build artifacts
-- `./ns3 distclean` – remove configuration, build, docs, tests, Python artifacts
-- `ccache -C` – clear compiler cache (shared across projects; optional)
+### 7) Destroy nodes (cleanup)
 
-The installer’s `--ns3-clean` flag uses these under the hood.
+```bash
+./main.py -d <N> -V debug destroy
+# example:
+./main.py -d 3 -V debug destroy
+```
 
 ---
 
-## Security Notes
-- The project does **not** store sudo passwords.
-- If you prefer passwordless sudo for specific networking commands, configure `/etc/sudoers` with minimal, command‑scoped rules (optional).
+## Examples
+
+### Create 5 devices, start network, run IDS
+
+```bash
+# In the first terminal, run:
+./main.py -d 5 create
+./main.py -d 5 ns3
+
+# Open a second terminal, run:
+docker exec -it emu3 bash
+./home/ids-online-predict.py --bundle /home/ids-model-bundle --duration 180
+```
+
+### Three short attacks back-to-back
+
+```bash
+# Open a third terminal, run:
+docker exec -it emu2 bash
+telnet localhost
+# then run (below are three different attacks):
+udp 10.0.0.1 2 dport=19
+syn 10.0.0.1 2 dport=80
+ack 10.0.0.1 2 dport=22
+```
+
+### Recreate with a different device count
+
+```bash
+./main.py -d 5 destroy
+./main.py -d 12 create
+./main.py -d 12 ns3
+```
+
+### Destroy and reclaim resources
+
+```bash
+./main.py -d 12 destroy
+```
 
 ---
 
-## Troubleshooting
-**Must reboot after install**  
-If `main.py` cannot talk to Docker without sudo, you didn't reboot. Reboot and try again.
+## Tips & Troubleshooting
 
-**Buildx package name differs**  
-The installer tries `docker-buildx` first and falls back to `docker-buildx-plugin` if available.
+* **“permission denied” on docker** → Reboot after install so your user is in the `docker` group.
+* **First `create` is slow** → Images are being built and cached; later runs are faster.
+* **“Error creating container side bridges”** → Re-run `./main.py -d <N> ns3` after `create`; ensure interfaces exist before continuing.
+* **No IDS output** → Ensure traffic is flowing (make sure ns3 is running: `./main.py -d <N> ns3`) and that IDS is running with the command above.
+* **Logs / artifacts**
 
-**ns‑3 “build.py not found”**  
-Newer ns‑3 uses the `./ns3` tool. The installer handles this automatically.
-
-**Interface not found during destroy**  
-Messages like “Cannot find device br‑emuX” are safe to ignore (interface already removed).
-
-**Quiet mode prints extra output**  
-Use `-V quiet` and consult run logs under `results/logs/<run_id>/` for details.
+  * Run logs: `results/logs/<run_id>/`
+  * ns-3 sources/build: `network/ns-allinone-<ver>/ns-<ver>/`
+  * Reclaim disk: `docker system prune -a` (careful: removes unused images, stopped containers, unused networks, and build cache).
 
 ---
 
-## Citing DDoShield‑IoT
-If you use this project in your research, please cite:
+## Citing DDoShield-IoT
 
-**DDoShield-IoT: A Testbed for Simulating and Lightweight Detection of IoT Botnet DDoS Attacks**  
-`devivo2024ddoshieldiot.pdf`
+If you use DDoShield-IoT in your research, please cite:
+
+[DDoShield-IoT: A Testbed for Simulating and Lightweight Detection of IoT Botnet DDoS Attacks](devivo2024ddoshieldiot.pdf)
 
 ```bibtex
 @inproceedings{devivo2024ddoshieldiot,
@@ -185,14 +239,17 @@ If you use this project in your research, please cite:
 ---
 
 ## Contributing
-Issues and PRs are welcome! See the code layout:
-- `install.sh` – installs Docker, Buildx, ns‑3; supports `-v`, `--ns3-configure-only`, profiles, and cleaning
-- `main.py` – orchestration of containers and ns‑3 emulation
-- `connections/` – tap/bridge setup scripts to wire Docker ↔ ns‑3
-- `docker/` – Dockerfiles and assets for Attacker/IDS/Devs/TServer
-- `network/` – ns‑3 sources and version pin (see `network/ns3_version`)
 
----
+PRs and issues are welcome!
+
+**Code layout**
+
+* `install.sh` — install dependencies (Docker, ns-3, etc.)
+* `main.py` — orchestrates containers and ns-3 runs
+* `docker/` — Dockerfiles and assets for Attacker/IDS/TServer/Devs
+* `connections/` — scripts that connect Docker ↔ ns-3
+* `network/` — ns-3 sources and config
 
 ## Contact
-- Islam Obaidat: <iaobaidat@ncat.edu>
+
+* Islam Obaidat — [iaobaidat@ncat.edu](mailto:iaobaidat@ncat.edu)

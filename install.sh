@@ -142,7 +142,7 @@ command -v sudo >/dev/null || fail "sudo is required."
 # --------------------------- Base packages ---------------------------
 info "Updating package index & installing base tools..."
 apt_update_retry
-apt_install ca-certificates gnupg gnupg2 lsb-release software-properties-common apt-transport-https wget curl
+apt_install ca-certificates gnupg gnupg2 lsb-release software-properties-common apt-transport-https wget curl net-tools
 apt_install g++ build-essential python3 python3-dev python3-setuptools python3-pip python-is-python3 \
             pkg-config cmake ninja-build git autoconf automake unzip p7zip-full libc6-dev libclang-dev llvm-dev libffi-dev
 
