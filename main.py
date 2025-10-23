@@ -11,7 +11,7 @@ import subprocess
 import os
 import signal
 import time
-import argparse
+import argparse as _argparse
 import datetime
 import shutil
 import logging
@@ -104,21 +104,24 @@ def _c(txt: str, style: str) -> str:
         return txt
     return f"{style}{txt}{_Ansi.RESET}"
 
+def _ns3_log_label(mode: str) -> str:
+    return {"0": "disabled", "1": "pcap only", "2": "pcap + stats"}.get(str(mode), str(mode))
+
 def print_run_context(op: str) -> None:
     # Pretty key:value block for current run
     items = [
         ("Operation", op),
         ("Number of Devs", str(NUM_DEVS)),
-        ("Simulation time", str(EMULATION_TIME_SEC)),
+        ("Simulation time (sec)", str(EMULATION_TIME_SEC)),
         ("Network Type", NETWORK_TYPE),
         ("Churn", "no churn" if CHURN_MODE == "0" else "static churn" if CHURN_MODE == "1" else "dynamic churn"),
-        ("NS3 File Log", "disabled" if NS3_FILE_LOG_MODE == "0" else "enabled"),
+        ("NS3 File Log", _ns3_log_label(NS3_FILE_LOG_MODE)),
         ("Project label", str(CONFIG["project_label"])),
         ("Destroy scope", str(CONFIG["destroy_scope"])),
         ("Run ID", RUN_ID),
     ]
     if NETWORK_TYPE == "wifi":
-        items.insert(5, ("Scenario Size (Disk)", str(SCENARIO_SIZE_METERS)))
+        items.insert(5, ("Scenario Size (meters)", str(SCENARIO_SIZE_METERS)))
     width = max(len(k) for k, _ in items)
     print()
     for k, v in items:
@@ -129,8 +132,6 @@ def print_run_context(op: str) -> None:
 
 
 # ------------------------------- Help/CLI UX ---------------------------------
-import argparse as _argparse
-
 class ColorHelpFormatter(_argparse.RawTextHelpFormatter, _argparse.ArgumentDefaultsHelpFormatter):
     def _color(self, s, style):
         return _c(s, style) if 'ENABLE_COLOR' in globals() and ENABLE_COLOR else s
@@ -224,23 +225,20 @@ def set_verbosity(verbosity: Optional[str]) -> None:
     v = (verbosity or os.getenv("DDOSIM_VERBOSITY", "quiet")).lower()
     VERBOSITY = v
     if v == "quiet":
-        configure_logging("INFO")
-        PRINT_CHILD_OUTPUT = False
+        configure_logging("INFO");  PRINT_CHILD_OUTPUT = False
+    elif v == "info":
+        configure_logging("INFO");  PRINT_CHILD_OUTPUT = False
     elif v == "verbose":
-        configure_logging("INFO")
-        PRINT_CHILD_OUTPUT = True
+        configure_logging("INFO");  PRINT_CHILD_OUTPUT = True
     elif v == "debug":
-        configure_logging("DEBUG")
-        PRINT_CHILD_OUTPUT = True
+        configure_logging("DEBUG"); PRINT_CHILD_OUTPUT = True
     else:
-        # default 'info'
-        configure_logging("INFO")
-        PRINT_CHILD_OUTPUT = False
+        configure_logging("INFO");  PRINT_CHILD_OUTPUT = False
 
 # ------------------------------- Config --------------------------------------
 def load_config() -> None:
     """
-    Load config from DDOSIM_CONFIG or ./ddosim.yaml (YAML preferred; JSON fallback).
+    Load config from DDOSIM_CONFIG or ./config.yaml (YAML preferred; JSON fallback).
     Merge shallowly over defaults.
     """
     global CONFIG, PIDS_DIR
@@ -383,7 +381,9 @@ def verify_expected_node_count() -> None:
         sys.exit(2)
     docker_files = max_node_index_in_pids()
     if docker_files != NUM_NODES:
-        LOGGER.error("Please correct the number of nodes (-d %d) in the command", docker_files)
+        LOGGER.error("Expected %d nodes for this run; found %d. Run with '-d %d' or use 'destroy' to reset.",
+                     NUM_NODES, docker_files, docker_files)
+
         sys.exit(2)
 
 
@@ -424,7 +424,6 @@ def ensure_sudo() -> None:
             LOGGER.error("Sudo authentication failed. Aborting.")
             sys.exit(2)
         LOGGER.debug("Sudo credentials cached.")
-
 
 # -------------------------- Setup / Build ------------------------------------
 def build_images_and_ns3() -> None:
@@ -477,47 +476,85 @@ def docker_label_flags(role: str) -> str:
         f'--label {LABEL_RUN_KEY}="{RUN_ID}"'
     )
 
+def docker_common_flags(role: str) -> str:
+    """
+    Common Docker run flags used for all roles.
+    - role: used for labeling (via docker_label_flags)
+    """
+    return " ".join([
+        "--platform linux/amd64",
+        "--restart=always",
+        "--sysctl net.ipv6.conf.all.disable_ipv6=0",
+        "--privileged",   # if you ever drop this, add --cap-add=NET_ADMIN for shapers
+        "-dit",
+        "--net=none",
+        docker_label_flags(role),
+    ])
 
 def start_role_containers() -> None:
     acc = 0
     dataset = Path(REPO_ROOT) / "docker" / "videos"
+    dataset.mkdir(parents=True, exist_ok=True)
+
+    # TServer (receiver)
     acc += run(
         " ".join([
-            "docker run --platform linux/amd64",
+            "docker run",
+            docker_common_flags("tserver"),
             f"--mount type=bind,src={shq(str(dataset))},dst=/srv/www,ro",
             "--mount type=tmpfs,target=/dev/shm/ftp,tmpfs-size=64m",
-            "--restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged",
-            "-dit --net=none", docker_label_flags("tserver"),
-            f"--name {CONTAINER_NAMES[1]}", CONFIG["images"]["tserver"]
+            f"--name {CONTAINER_NAMES[1]}",
+            CONFIG["images"]["tserver"],
         ]),
         check=False, label="docker_run_tserver"
     ).returncode
 
+    # Attacker
     acc += run(
-        f"docker run --platform linux/amd64 --restart=always "
-        f"--sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged -dit --net=none "
-        f"{docker_label_flags('attacker')} --name {CONTAINER_NAMES[2]} {CONFIG['images']['attacker']}",
+        " ".join([
+            "docker run",
+            docker_common_flags("attacker"),
+            f"--name {CONTAINER_NAMES[2]}",
+            CONFIG["images"]["attacker"],
+        ]),
         check=False, label="docker_run_attacker"
     ).returncode
 
+    # IDS
+    ids_dataset = Path(REPO_ROOT) / "docker" / "IDS" / "pcap_datasets"
+    ids_dataset.mkdir(parents=True, exist_ok=True)
+
     acc += run(
-        f"docker run --platform linux/amd64 --restart=always "
-        f"--sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged "
-        f"-v {REPO_ROOT}/docker/IDS/pcap_datasets:/dataset "
-        f"-dit --net=none {docker_label_flags('ids')} "
-        f"--name {CONTAINER_NAMES[3]} {CONFIG['images']['ids']}",
+        " ".join([
+            "docker run",
+            docker_common_flags("ids"),
+            f"--mount type=bind,src={shq(str(ids_dataset))},dst=/dataset,ro",
+            f"--name {CONTAINER_NAMES[3]}",
+            CONFIG["images"]["ids"],
+        ]),
         check=False, label="docker_run_ids"
     ).returncode
 
+    # Devs (N devices) — read-only video corpus at /data
+
+    # docker run \
+    #   -v /path/to/videos:/data \
+    #  -e SERVER_IP=10.0.0.1 \
+    #  -e BW_RERANDOMIZE=true -e BW_RERANDOMIZE_MINUTES=10
+    #  -e PAUSE_BETWEEN_FILES=true -e PAUSE_MAX_SECS=3
+    #  -e APP_CMD=run_ffmpeg #(or run_curl_http, run_curl_ftp)
+
     for i in range(NUM_INFRA_NODES + 1, NUM_NODES + 1):
         acc += run(
-        f"docker run --platform linux/amd64 "
-        f"-v {dataset}:/data:ro "
-        f"--restart=always --sysctl net.ipv6.conf.all.disable_ipv6=0 --privileged "
-        f"-dit --net=none {docker_label_flags('dev')} "
-        f"--name {CONTAINER_NAMES[i]} {CONFIG['images']['dev']}",
-        check=False, label=f"docker_run_dev_{i}"
-    ).returncode
+            " ".join([
+                "docker run",
+                docker_common_flags("dev"),
+                f"--mount type=bind,src={shq(str(dataset))},dst=/data,ro",
+                f"--name {CONTAINER_NAMES[i]}",
+                CONFIG["images"]["dev"],
+            ]),
+            check=False, label=f"docker_run_dev_{i}"
+        ).returncode
 
     if acc != 0:
         LOGGER.error("One or more containers failed to start.")
@@ -558,20 +595,27 @@ def setup_ns3_taps_and_bridges() -> None:
 
 
 def setup_ids_mirroring() -> None:
-    subprocess.run("sudo modprobe ifb", shell=True, check=True)
+    """
+    Prepare IDS container interfaces for passive capture/mirroring.
+    - Loads IFB if present (no-op if not available)
+    - Sets promisc and redirects ingress as needed
+    """
+    # Do not abort if IFB is unavailable
+    subprocess.run("sudo modprobe ifb || true", shell=True, check=False)
     subprocess.run(
-        "PID=`docker inspect --format '{{ .State.Pid }}' emu3` && "
-        "sudo ip netns exec $PID ifconfig eth0 0.0.0.0 promisc up",
-        shell=True, check=True
+        "PID=$(docker inspect --format '{{ .State.Pid }}' emu3) && "
+        "sudo ip netns exec $PID ip link set dev eth0 promisc on up",
+        shell=True, check=False
     )
+
+    # tc mirroring with idempotent guards
     subprocess.run(
-        "sudo tc qdisc add dev tap-emu3 ingress && "
+        "sudo tc qdisc add dev tap-emu3 ingress 2>/dev/null || true && "
         "sudo tc filter add dev tap-emu3 parent ffff: protocol all u32 match u32 0 0 "
-        "action mirred egress redirect dev si-emu3",
-        shell=True, check=True
+        "action mirred egress redirect dev si-emu3 2>/dev/null || true",
+        shell=True, check=False
     )
     LOGGER.info("IDS mirroring configured.")
-
 
 # ----------------------------- Primary Ops -----------------------------------
 def create_environment() -> None:
@@ -611,16 +655,9 @@ def run_ns3(return_proc: bool = False):
     existing_pid = read_pidfile("ns3")
     if existing_pid and pid_exists(existing_pid):
         LOGGER.info("ns-3 is still running with pid = %d", existing_pid)
-        return None if not return_proc else None
+        return None
 
     LOGGER.info("About to start ns-3 with total emulation time of %s", EMULATION_TIME_SEC)
-
-    # docker run --cap-add=NET_ADMIN \
-    #   -v /path/to/videos:/data \
-    #  -e SERVER_IP=10.0.0.1 \
-    #  -e BW_RERANDOMIZE=true -e BW_RERANDOMIZE_MINUTES=10
-    #  -e PAUSE_BETWEEN_FILES=true -e PAUSE_MAX_SECS=3
-    #  -e APP_CMD=run_ffmpeg #(or run_curl_http, run_curl_ftp)
 
     base = "cd $NS3_HOME && "
     if NETWORK_TYPE == "wifi":
@@ -644,15 +681,25 @@ def run_ns3(return_proc: bool = False):
         print(f"NS3_HOME={os.environ['NS3_HOME'].strip()} && {ns3_cmd}")
 
     proc = subprocess.Popen(ns3_cmd, shell=True)
+    write_pidfile("ns3", proc.pid)
+    LOGGER.info("ns-3 started (pid=%s) | %s", proc.pid, datetime.datetime.now())
+
+    # If caller wants the proc, do NOT block here.
+    if return_proc:
+        return proc
+
     time.sleep(10)
     proc.poll()
-    input("\nPress the Enter key to continue...")
 
-    LOGGER.info("ns-3 proc pid = %s", proc.pid)
-    write_pidfile("ns3", proc.pid)
+    # Interactive: pause until user confirms
+    try:
+        input("\nPress Enter to leave ns-3 running in the background…")
+    except EOFError:
+        pass
+    
     LOGGER.info("Running ns-3 in the background | %s", datetime.datetime.now())
 
-    return proc if return_proc else None
+    return None
 
 
 def run_emulation() -> None:
@@ -716,17 +763,27 @@ def destroy_environment() -> None:
 
     ns3_pid = read_pidfile("ns3")
     if ns3_pid and os.path.exists(f"/proc/{ns3_pid}"):
-        LOGGER.info("ns-3 is running ... killing the ns-3 process")
+        LOGGER.info("ns-3 is running ... terminating process %s", ns3_pid)
         try:
-            os.killpg(os.getpgid(ns3_pid), signal.SIGTERM)
-            LOGGER.info("Killed ns-3 process")
+            os.kill(ns3_pid, signal.SIGTERM)
         except Exception as ex:
-            LOGGER.warning("Failed to kill ns-3 process: %s", ex)
+            LOGGER.warning("SIGTERM failed for ns-3 (pid=%s): %s", ns3_pid, ex)
+        # wait a bit, then SIGKILL if still alive
+        for _ in range(10):
+            if not os.path.exists(f"/proc/{ns3_pid}"):
+                break
+            time.sleep(0.2)
+        if os.path.exists(f"/proc/{ns3_pid}"):
+            LOGGER.warning("ns-3 still alive; sending SIGKILL")
+            try:
+                os.kill(ns3_pid, signal.SIGKILL)
+            except Exception:
+                pass
         try:
             os.remove(os.path.join(PIDS_DIR, "ns3"))
         except Exception:
             pass
-        subprocess.run("sudo modprobe -r ifb", shell=True)
+        subprocess.run("sudo modprobe -r ifb || true", shell=True, check=False)
 
     scope = CONFIG.get("destroy_scope", "project")
     project_filter = f"--filter label={LABEL_PROJECT_KEY}={CONFIG['project_label']}"
@@ -777,6 +834,9 @@ def destroy_environment() -> None:
 
 # --------------------------------- CLI ---------------------------------------
 def parse_args():
+    """
+    CLI parser
+    """
     epilog = """
 Examples:
   {prog} create          # build images, set up taps/bridges, start containers
@@ -785,8 +845,10 @@ Examples:
   {prog} destroy         # stop and remove labeled DDoSim containers and taps
 
 Tips:
-  • Default verbosity is 'quiet' (clean console). Use -V verbose or -V debug to stream all outputs.
-  • Config file: ddosim.yaml (or set DDOSIM_CONFIG=/path/to/file).
+  • Default verbosity is 'quiet' (clean console).
+  • Use '-v' alone for maximum verbosity ('debug'), or provide a level explicitly:
+      -v info     | -v verbose     | -v debug
+  • Config file: config.yaml (or set DDOSIM_CONFIG=/path/to/file).
   • Colors: --color auto|always|never.
 """.format(prog=os.path.basename(sys.argv[0]))
     parser = DDoSimArgumentParser(
@@ -795,11 +857,13 @@ Tips:
         formatter_class=ColorHelpFormatter,
         epilog=epilog
     )
+
+    # COMMAND
     parser.add_argument("operation", type=str,
                         choices=["create", "ns3", "emulation", "destroy"],
                         help="Operation to perform: create, ns3, emulation, destroy")
 
-    # Backwards-compatible flags + friendlier long names
+    # OPTIONS
     parser.add_argument("-d", "--devs", "--dev-count", dest="devs", type=int, help="Number of Devs in the simulation")
     parser.add_argument("-t", "--time", "--sim-time", dest="time", type=int, help="NS3 simulation time in seconds")
     parser.add_argument("-n", "--network", "--net-type", dest="network", type=str, choices=["csma", "wifi"],
@@ -812,19 +876,33 @@ Tips:
     parser.add_argument("-j", "--jobs", "--build-jobs", dest="jobs", type=int, help="Number of parallel build jobs")
     parser.add_argument("--destroy-scope", choices=["project", "run", "all"],
                         help="Destroy only current run's containers, all project containers, or every ddosim container")
-    parser.add_argument("-V", "--verbosity", choices=["quiet", "info", "verbose", "debug"],
-                        help="Console output verbosity level (default: quiet)")
     parser.add_argument("--color", choices=["auto","always","never"], default="auto",
                         help="Colorize console output (default: auto)")
-    parser.add_argument("-v", "--version", action="version", version="%(prog)s 3.2")
-        # If invoked without arguments, show help.
+
+    # Verbosity: '-v' alone => 'debug'; otherwise one of the choices below.
+    parser.add_argument(
+        "-v", "--verbosity",
+        nargs="?",                 # value is optional
+        const="debug",             # if '-v' given with no value -> 'debug'
+        choices=["quiet", "info", "verbose", "debug"],
+        help="Console output verbosity level (default: quiet). Use '-v' for maximum ('debug'), "
+             "or '-v <level>' to pick one."
+    )
+
+    # If invoked without arguments, show help.
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(2)
+
     return parser.parse_args()
 
-
 def main():
+    """
+        Entry point for DDoSim Orchestrator.
+        - Parses CLI args and config
+        - Normalizes/validates key options (notably the number of Devs)
+        - Dispatches to the chosen operation
+    """
     global NUM_DEVS, EMULATION_TIME_SEC, CHURN_MODE, NS3_FILE_LOG_MODE
     global NETWORK_TYPE, SCENARIO_SIZE_METERS, BUILD_JOBS, NUM_NODES, CONTAINER_NAMES
     global CONTAINER_BASENAME
@@ -833,7 +911,7 @@ def main():
     configure_logging()
     load_config()
 
-    # Signals
+    # Graceful shutdown on signals
     def _sig_handler(signum, frame):
         LOGGER.warning("Interrupt signal received.")
         destroy_environment()
@@ -850,9 +928,26 @@ def main():
     set_color_mode(args.color)
     set_verbosity(args.verbosity)
 
+    # -----------------------------
     # Apply config, then CLI overrides
+    # -----------------------------
+
+    # Dev count (Devs = IoT devices that generate traffic). They are required for both
+    # DDoS attack emulation and IDS evaluation. If the user passes "-d 0", we warn and
+    # proceed with 1 device for a usable default.
     if args.devs is not None:
-        CONFIG["num_devs"] = max(1, int(args.devs))
+        requested = int(args.devs)
+        if requested <= 0:
+            # Explicit user input "-d 0" (or negative) — warn and default to 1
+            LOGGER.warning(
+                "IoT devices are required for the simulation. You provided '-d %d'. "
+                "Devs are needed for both DDoS attacks and IDS evaluation. "
+                "Proceeding with 1 device.", requested
+            )
+            CONFIG["num_devs"] = 1
+        else:
+            CONFIG["num_devs"] = requested
+
     if args.time is not None:
         CONFIG["emulation_time_sec"] = int(args.time)
     if args.network is not None:
@@ -869,27 +964,39 @@ def main():
         CONFIG["destroy_scope"] = args.destroy_scope
 
     # Sync globals from CONFIG
-    NUM_DEVS = CONFIG["num_devs"]
-    EMULATION_TIME_SEC = CONFIG["emulation_time_sec"]
-    CHURN_MODE = CONFIG["churn_mode"]
-    NS3_FILE_LOG_MODE = CONFIG["ns3_file_log_mode"]
-    SCENARIO_SIZE_METERS = CONFIG["scenario_size_meters"]
-    NETWORK_TYPE = CONFIG["network_type"]
-    BUILD_JOBS = CONFIG["build_jobs"]
+    NUM_DEVS = int(CONFIG.get("num_devs", 1))
+    EMULATION_TIME_SEC = int(CONFIG.get("emulation_time_sec", EMULATION_TIME_SEC))
+    CHURN_MODE = str(CONFIG.get("churn_mode", CHURN_MODE))
+    NS3_FILE_LOG_MODE = str(CONFIG.get("ns3_file_log_mode", NS3_FILE_LOG_MODE))
+    SCENARIO_SIZE_METERS = str(CONFIG.get("scenario_size_meters", SCENARIO_SIZE_METERS))
+    NETWORK_TYPE = str(CONFIG.get("network_type", NETWORK_TYPE))
+    BUILD_JOBS = int(CONFIG.get("build_jobs", BUILD_JOBS))
 
-    if NUM_DEVS < 1:
-        print("Number of Devs should be 1 or more")
-        sys.exit(2)
+    # Final safety net for invalid dev counts from config files/env (<= 0):
+    if NUM_DEVS <= 0:
+        LOGGER.warning(
+            "Configuration requested %d Devs (<= 0). IoT devices are required for the simulation. "
+            "Proceeding with 1 device.", NUM_DEVS
+        )
+        NUM_DEVS = 1
+        CONFIG["num_devs"] = 1
 
     CONTAINER_BASENAME = CONFIG["container_basename"]
     NUM_NODES = NUM_INFRA_NODES + NUM_DEVS
+
+    # Names: emu1=TServer, emu2=Attacker, emu3=IDS, emu4..=Devs
     CONTAINER_NAMES = [f"{CONTAINER_BASENAME}{i}" for i in range(0, NUM_NODES + 1)]
 
+    # Prepare results/log directories and NS-3 env (sanity checks)
     ensure_results_dir()
     set_env_ns3_home()
 
+    # Summarize the run context (colorized table)
     print_run_context(args.operation)
 
+    # -----------------------------
+    # Dispatch selected operation
+    # -----------------------------
     op = args.operation
     if op == "create":
         create_environment()
@@ -901,7 +1008,6 @@ def main():
         run_emulation()
     else:
         print("Nothing to be done ...")
-
 
 if __name__ == "__main__":
     main()

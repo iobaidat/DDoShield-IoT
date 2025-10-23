@@ -73,19 +73,29 @@ cd ~/DDoShield-IoT
 To Create a specific number of Devs (i.e., IoT Devices), use the following command:
 
 ```bash
-./main.py -d <N> -V debug create
-# examples: create 2 device
-./main.py -d 3 -V debug create
+./main.py -d <N> -v create
+# examples: create 3 device
+./main.py -d 3 -v create
 ```
 
 > **Note — First Run Takes Longer**
-> The very first `./main.py -d <N> create` (optionally with `-V debug`) can take a while
+> The very first `./main.py -d <N> create` (optionally with `-v`) can take a while
 > because Docker builds all node images (Attacker, Devs, TServer, IDS) and pulls base
 > layers. Subsequent runs are **much faster** thanks to Docker layer caching.
 >
 > Tips:
-> - Use `-V debug` once to see build progress (e.g., `./main.py -d 2 -V debug create`).
->   After the first run you can omit `-V debug` (default output is concise).
+>
+> * Use `-v` (or `-v debug`) once to see full build progress, e.g.:
+>
+>   ```bash
+>   ./main.py -d 3 -v debug create
+>   ```
+> * Other verbosity options if you prefer less output:
+>
+>   * `-v info` – concise status
+>   * `-v verbose` – includes child process output
+>   * `-v debug` – maximum detail
+> * After the first run you can omit `-v` (default output is concise).
 > - Check disk usage with `docker system df`.
 > - To reclaim space later: `docker system prune -a` (removes **unused** images, **stopped**
 >   containers, unused networks, and build cache). After pruning, the next
@@ -94,9 +104,9 @@ To Create a specific number of Devs (i.e., IoT Devices), use the following comma
 ### 4) Start the ns-3 network
 
 ```bash
-./main.py -d <N> -V debug ns3
+./main.py -d <N> -v ns3
 # examples:
-./main.py -d 3 -V debug ns3
+./main.py -d 3 -v ns3
 ```
 
 This creates bridges/taps, attaches containers, configures the simulator, and starts emulation. The target server (TServer) is reachable at **10.0.0.1** by default.
@@ -183,9 +193,9 @@ General form:
 ### 7) Destroy nodes (cleanup)
 
 ```bash
-./main.py -d <N> -V debug destroy
+./main.py -d <N> -v destroy
 # example:
-./main.py -d 3 -V debug destroy
+./main.py -d 3 -v destroy
 ```
 
 ---
