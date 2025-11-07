@@ -73,19 +73,19 @@ cd ~/DDoShield-IoT
 To Create a specific number of Devs (i.e., IoT Devices), use the following command:
 
 ```bash
-./main.py -d <N> -v create
+./main.py -d <N> -v debug create
 # examples: create 3 device
-./main.py -d 3 -v create
+./main.py -d 3 -v debug create
 ```
 
 > **Note — First Run Takes Longer**
-> The very first `./main.py -d <N> create` (optionally with `-v`) can take a while
+> The very first `./main.py -d <N> create` (optionally with `-v debug`) can take a while
 > because Docker builds all node images (Attacker, Devs, TServer, IDS) and pulls base
 > layers. Subsequent runs are **much faster** thanks to Docker layer caching.
 >
 > Tips:
 >
-> * Use `-v` (or `-v debug`) once to see full build progress, e.g.:
+> * Use `-v debug` once to see full build progress, e.g.:
 >
 >   ```bash
 >   ./main.py -d 3 -v debug create
@@ -104,9 +104,9 @@ To Create a specific number of Devs (i.e., IoT Devices), use the following comma
 ### 4) Start the ns-3 network
 
 ```bash
-./main.py -d <N> -v ns3
+./main.py -d <N> -v debug ns3
 # examples:
-./main.py -d 3 -v ns3
+./main.py -d 3 -v debug ns3
 ```
 
 This creates bridges/taps, attaches containers, configures the simulator, and starts emulation. The target server (TServer) is reachable at **10.0.0.1** by default.
@@ -193,9 +193,9 @@ General form:
 ### 7) Destroy nodes (cleanup)
 
 ```bash
-./main.py -d <N> -v destroy
+./main.py -d <N> -v debug destroy
 # example:
-./main.py -d 3 -v destroy
+./main.py -d 3 -v debug destroy
 ```
 
 ---

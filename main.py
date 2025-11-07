@@ -428,13 +428,13 @@ def ensure_sudo() -> None:
 # -------------------------- Setup / Build ------------------------------------
 def build_images_and_ns3() -> None:
     # Docker builds (logs captured unless verbose/debug)
-    run(f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 -t {CONFIG['images']['tserver']} docker/TServer/.",
+    run(f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load -t {CONFIG['images']['tserver']} docker/TServer/.",
         label="build_tserver")
-    run(f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 -t {CONFIG['images']['attacker']} docker/Attacker/.",
+    run(f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load -t {CONFIG['images']['attacker']} docker/Attacker/.",
         label="build_attacker")
-    run(f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 -t {CONFIG['images']['ids']} docker/IDS/.",
+    run(f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load -t {CONFIG['images']['ids']} docker/IDS/.",
         label="build_ids")
-    run(f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 -t {CONFIG['images']['dev']} docker/Devs/.",
+    run(f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load -t {CONFIG['images']['dev']} docker/Devs/.",
         label="build_dev")
 
     # ns-3 dir check
@@ -846,8 +846,8 @@ Examples:
 
 Tips:
   • Default verbosity is 'quiet' (clean console).
-  • Use '-v' alone for maximum verbosity ('debug'), or provide a level explicitly:
-      -v info     | -v verbose     | -v debug
+  • Use '-v debug' for maximum detail, or:
+      -v info     | -v verbose     | -v quiet
   • Config file: config.yaml (or set DDOSIM_CONFIG=/path/to/file).
   • Colors: --color auto|always|never.
 """.format(prog=os.path.basename(sys.argv[0]))
@@ -879,14 +879,11 @@ Tips:
     parser.add_argument("--color", choices=["auto","always","never"], default="auto",
                         help="Colorize console output (default: auto)")
 
-    # Verbosity: '-v' alone => 'debug'; otherwise one of the choices below.
+    # Verbosity (requires explicit level)
     parser.add_argument(
         "-v", "--verbosity",
-        nargs="?",                 # value is optional
-        const="debug",             # if '-v' given with no value -> 'debug'
         choices=["quiet", "info", "verbose", "debug"],
-        help="Console output verbosity level (default: quiet). Use '-v' for maximum ('debug'), "
-             "or '-v <level>' to pick one."
+        help="Console output verbosity level (default: quiet)",
     )
 
     # If invoked without arguments, show help.
