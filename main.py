@@ -769,7 +769,15 @@ def start_role_containers() -> None:
         label="docker_run_ids",
     ).returncode
 
-    # Devs (IoT devices)
+    # Devs (N devices) — read-only video corpus at /data
+
+    # docker run \
+    #   -v /path/to/videos:/data \
+    #  -e SERVER_IP=10.0.0.1 \
+    #  -e BW_RERANDOMIZE=true -e BW_RERANDOMIZE_MINUTES=10
+    #  -e PAUSE_BETWEEN_FILES=true -e PAUSE_MAX_SECS=3
+    #  -e APP_CMD=run_ffmpeg #(or run_curl_http, run_curl_ftp)
+
     for i in range(NUM_INFRA_NODES + 1, NUM_NODES + 1):
         acc += run(
             " ".join(
