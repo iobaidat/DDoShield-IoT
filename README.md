@@ -53,6 +53,48 @@ Examples:
 # Reconfigure/rebuild with full clean (debug)
 ./install.sh --ns3-configure-only --ns3-clean distclean --ns3-profile debug
 ```
+
+### How ns-3 version is selected
+
+The `install.sh` script manages the ns-3 version for you and records it in `network/ns3_version`.
+`main.py` then reads this file to know which ns-3 tree to use.
+
+Behavior:
+
+- **If you do nothing**:
+  - `./install.sh` automatically detects the latest stable ns-3 release from the official
+    ns-3 repositories and installs it.
+  - The selected version is written to:
+    `network/ns3_version`
+- **If you want a specific version**:
+  - Run:
+    ```bash
+    ./install.sh --ns3-version X.YY
+    ```
+    (for example: `./install.sh --ns3-version 3.42`)
+  - The script validates that the corresponding tarball exists and only then updates
+    `network/ns3_version`.
+
+Layout handling (automatic):
+
+- For **ns-3 < 3.35**:
+  - Uses `ns-allinone-X.YY` layout:
+    `network/ns-allinone-X.YY/ns-X.YY`
+- For **ns-3 ≥ 3.35**:
+  - Uses the core-only layout:
+    `network/ns-X.YY/`
+
+At runtime:
+
+- `main.py` checks:
+  - that `network/ns3_version` exists,
+  - that the matching ns-3 directory exists,
+  - and that the `ns3` launcher is present.
+- If anything is missing or inconsistent, it will instruct you to re-run:
+  ```bash
+  ./install.sh [--ns3-version X.YY]
+  ```
+
 ---
 
 ## Usage: Full Workflow
@@ -74,7 +116,7 @@ To Create a specific number of Devs (i.e., IoT Devices), use the following comma
 
 ```bash
 ./main.py -d <N> -v debug create
-# examples: create 3 device
+# examples: create 2 device
 ./main.py -d 3 -v debug create
 ```
 
@@ -84,18 +126,8 @@ To Create a specific number of Devs (i.e., IoT Devices), use the following comma
 > layers. Subsequent runs are **much faster** thanks to Docker layer caching.
 >
 > Tips:
->
-> * Use `-v debug` once to see full build progress, e.g.:
->
->   ```bash
->   ./main.py -d 3 -v debug create
->   ```
-> * Other verbosity options if you prefer less output:
->
->   * `-v info` – concise status
->   * `-v verbose` – includes child process output
->   * `-v debug` – maximum detail
-> * After the first run you can omit `-v` (default output is concise).
+> - Use `-v debug` once to see build progress (e.g., `./main.py -d 2 -v debug create`).
+>   After the first run you can omit `-v debug` (default output is concise).
 > - Check disk usage with `docker system df`.
 > - To reclaim space later: `docker system prune -a` (removes **unused** images, **stopped**
 >   containers, unused networks, and build cache). After pruning, the next
@@ -122,7 +154,7 @@ docker exec -it emu3 bash
 Start the online IDS with:
 
 ```bash
-./home/ids-online-predict.py --bundle /home/ids-model-bundle --duration 180
+/home/ids-online-predict.py --bundle /home/ids-model-bundle --duration 180
 ```
 
 * `--bundle` → path to the deployed model bundle
@@ -142,7 +174,7 @@ Open **another terminal** (third terminal) and attach to the Attacker container 
 docker exec -it emu2 bash
 ```
 
-Then open the C&C Server:
+Then open the C&C console:
 ```bash
 telnet localhost
 # Credentials:
@@ -152,7 +184,7 @@ telnet localhost
 
 To launch an attack, make sure that Devs are connected to the C&C Server.
 
-**Check that bots (compromised Devs) are connected**
+**Check that bots (Devs) are connected**
 
 * Type `botcount` in the C&C console to show how many bots are currently connected.
 * The terminal title bar will also display the number of connected bots.
@@ -187,8 +219,10 @@ General form:
 
 **Tips**
 
+* You can queue multiple attacks back-to-back by entering several lines in the C&C console.
 * To exit the C&C: type `quit` or `exit`.
 * If no bots show up in `botcount`, make sure the Dev containers were created and attached to the ns-3 network (`./main.py -d <N> create` then `./main.py -d <N> ns3`).
+
 
 ### 7) Destroy nodes (cleanup)
 
@@ -239,51 +273,6 @@ ack 10.0.0.1 2 dport=22
 ```bash
 ./main.py -d 12 destroy
 ```
-
----
-
-> ### Capturing PCAPs (Wireshark or tcpdump)
-> You can capture traffic from any node in the testbed for analysis. Install tools on the **host**:
->
-> ```bash
-> sudo apt-get install -y wireshark tcpdump
-> ```
->
-> **Node naming cheat-sheet**
-> - `emu1` = TServer (target)
-> - `emu2` = Attacker (C&C)
-> - `emu3` = IDS
-> - `emu4` and above = IoT devices (e.g., with `-d 2`, devices are `emu4`, `emu5`)
->
-> #### Option A — Wireshark (GUI)
-> 1) Open **Wireshark** on the host.
-> 2) Select the interface named **`si-emuN`** for the node you want to monitor  
->    (e.g., **`si-emu3`** to monitor all packets delivered to the IDS).
-> 3) Click **Start**. When done, **File → Save As…** to export a **.pcap**.
->
-> #### Option B — tcpdump (CLI, host-side)
-> Use this one-liner to capture on the **host interface** that corresponds to a container’s `eth0`.
-> It writes a timestamped **.pcap** in the current directory.
->
-> ```bash
-> # Example: capture for the IDS (emu3)
-> cid=emu3; sudo tcpdump -i "$(ip -o link | awk -F': ' -v idx=$(docker exec "$cid" cat /sys/class/net/eth0/iflink) '$1==idx {split($2,a,\"@\"); print a[1]}')" \
->   -s0 -n -w "${cid}_$(date +%s).pcap"
-> ```
->
-> - Similar to Wireshark, to capture the **Attacker** use `cid=emu2`, for the **TServer** use `cid=emu1`, etc.
-> - Press **Ctrl+C** to stop. The PCAP is saved in your current directory.
->
-> **Tips**
-> - Limit duration or rotate files to avoid large captures:
->   ```bash
->   # 60-second chunks, keep 5 files max (rotating), full packets, no DNS lookups
->   cid=emu3; sudo tcpdump -i "$(ip -o link | awk -F': ' -v idx=$(docker exec "$cid" cat /sys/class/net/eth0/iflink) '$1==idx {split($2,a,\"@\"); print a[1]}')" \
->     -s0 -n -G 60 -W 5 -w "${cid}_%Y%m%d-%H%M%S.pcap"
->   ```
-> - Verify a capture: open in Wireshark or run `capinfos <file>.pcap`.
-> - If your distro restricts GUI capture without root, add your user to the `wireshark` group and re-log, or run Wireshark/tcpdump with `sudo`.
-
 
 ---
 

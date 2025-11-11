@@ -44,31 +44,36 @@ DEFAULTS: Dict[str, Any] = {
 }
 
 CONFIG: Dict[str, Any] = DEFAULTS.copy()
+
 # ------------------------------- Console UX ----------------------------------
-# Color + structured output helpers (no external deps).
 ENABLE_COLOR = True  # computed by set_color_mode()
 COLOR_MODE = "auto"  # auto | always | never
 
+
 class _Ansi:
-    RESET   = "\x1b[0m"
-    BOLD    = "\x1b[1m"
-    DIM     = "\x1b[2m"
-    FG_RED  = "\x1b[31m"
-    FG_GRN  = "\x1b[32m"
-    FG_YEL  = "\x1b[33m"
-    FG_BLU  = "\x1b[34m"
-    FG_CYN  = "\x1b[36m"
-    FG_GRY  = "\x1b[90m"
+    RESET = "\x1b[0m"
+    BOLD = "\x1b[1m"
+    DIM = "\x1b[2m"
+    FG_RED = "\x1b[31m"
+    FG_GRN = "\x1b[32m"
+    FG_YEL = "\x1b[33m"
+    FG_BLU = "\x1b[34m"
+    FG_CYN = "\x1b[36m"
+    FG_GRY = "\x1b[90m"
+
 
 def _supports_color() -> bool:
     return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 
+
 def _conn_verbose_flag() -> str:
     return " -v" if PRINT_CHILD_OUTPUT else ""
+
 
 def _conn_env_prefix() -> str:
     # scripts that read env verbosity (singleEndSetup/singleDestroy)
     return f"DDOSIM_SCRIPT_VERBOSE={'1' if PRINT_CHILD_OUTPUT else '0'}"
+
 
 def set_color_mode(mode: str | None) -> None:
     global ENABLE_COLOR, COLOR_MODE
@@ -80,6 +85,7 @@ def set_color_mode(mode: str | None) -> None:
     else:
         ENABLE_COLOR = _supports_color()
 
+
 class _ColorFormatter(logging.Formatter):
     _map = {
         "DEBUG": _Ansi.FG_GRY,
@@ -87,6 +93,7 @@ class _ColorFormatter(logging.Formatter):
         "WARNING": _Ansi.FG_YEL,
         "ERROR": _Ansi.FG_RED,
     }
+
     def format(self, record: logging.LogRecord) -> str:
         if not ENABLE_COLOR:
             return super().format(record)
@@ -99,13 +106,16 @@ class _ColorFormatter(logging.Formatter):
         finally:
             record.levelname = orig
 
+
 def _c(txt: str, style: str) -> str:
     if not ENABLE_COLOR:
         return txt
     return f"{style}{txt}{_Ansi.RESET}"
 
+
 def _ns3_log_label(mode: str) -> str:
     return {"0": "disabled", "1": "pcap only", "2": "pcap + stats"}.get(str(mode), str(mode))
+
 
 def print_run_context(op: str) -> None:
     # Pretty key:value block for current run
@@ -114,7 +124,14 @@ def print_run_context(op: str) -> None:
         ("Number of Devs", str(NUM_DEVS)),
         ("Simulation time (sec)", str(EMULATION_TIME_SEC)),
         ("Network Type", NETWORK_TYPE),
-        ("Churn", "no churn" if CHURN_MODE == "0" else "static churn" if CHURN_MODE == "1" else "dynamic churn"),
+        (
+            "Churn",
+            "no churn"
+            if CHURN_MODE == "0"
+            else "static churn"
+            if CHURN_MODE == "1"
+            else "dynamic churn",
+        ),
         ("NS3 File Log", _ns3_log_label(NS3_FILE_LOG_MODE)),
         ("Project label", str(CONFIG["project_label"])),
         ("Destroy scope", str(CONFIG["destroy_scope"])),
@@ -134,33 +151,35 @@ def print_run_context(op: str) -> None:
 # ------------------------------- Help/CLI UX ---------------------------------
 class ColorHelpFormatter(_argparse.RawTextHelpFormatter, _argparse.ArgumentDefaultsHelpFormatter):
     def _color(self, s, style):
-        return _c(s, style) if 'ENABLE_COLOR' in globals() and ENABLE_COLOR else s
+        return _c(s, style) if "ENABLE_COLOR" in globals() and ENABLE_COLOR else s
 
     def format_help(self):
         text = super().format_help()
 
-        # Colorize common section titles
         text = text.replace("usage:", self._color("USAGE", _Ansi.FG_CYN + _Ansi.BOLD))
         text = text.replace("positional arguments:", self._color("COMMAND", _Ansi.FG_BLU + _Ansi.BOLD))
-        # Python 3.10+ uses "options" instead of "optional arguments"
         text = text.replace("optional arguments:", self._color("OPTIONS", _Ansi.FG_BLU + _Ansi.BOLD))
         text = text.replace("options:", self._color("OPTIONS", _Ansi.FG_BLU + _Ansi.BOLD))
 
-        # Light style tweaks
         lines = []
         for ln in text.splitlines():
             if ln.strip().startswith("-") and ln.strip().endswith(":"):
-                # don't over-style argument names lines
                 lines.append(ln)
             else:
                 lines.append(ln)
         return "\n".join(lines)
 
+
 class DDoSimArgumentParser(_argparse.ArgumentParser):
     def error(self, message):
-        msg = _c(f"error: {message}", _Ansi.FG_RED + _Ansi.BOLD) if ENABLE_COLOR else f"error: {message}"
+        msg = (
+            _c(f"error: {message}", _Ansi.FG_RED + _Ansi.BOLD)
+            if ENABLE_COLOR
+            else f"error: {message}"
+        )
         self.print_usage()
         self.exit(2, msg + "\n\n" + self.format_help())
+
 
 # ------------------------------- Globals -------------------------------------
 LOGGER = logging.getLogger("ddosim")
@@ -168,7 +187,10 @@ REPO_ROOT: str = os.path.dirname(os.path.realpath(__file__))
 RESULTS_DIR: Optional[str] = None
 LOG_DIR: Optional[str] = None
 PIDS_DIR: str = CONFIG["paths"]["pids_dir"]
-RUN_ID: str = os.environ.get("DDOSIM_RUN_ID", datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + str(os.getpid()))
+RUN_ID: str = os.environ.get(
+    "DDOSIM_RUN_ID",
+    datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + str(os.getpid()),
+)
 
 NUM_INFRA_NODES = 3  # TServer, Attacker, IDS
 NUM_DEVS = CONFIG["num_devs"]
@@ -192,14 +214,9 @@ LABEL_PROJECT_KEY = "ddosim.project"
 LABEL_ROLE_KEY = "ddosim.role"
 LABEL_RUN_KEY = "ddosim.run_id"
 
-# Verbosity control
-# quiet   -> WARNING logs, child output suppressed
-# info    -> INFO logs, child output suppressed (summary only)
-# verbose -> INFO logs, child output streamed live
-# debug   -> DEBUG logs, child output streamed live
+# Verbosity
 VERBOSITY = "quiet"
 PRINT_CHILD_OUTPUT = False  # toggled by set_verbosity()
-
 
 # ------------------------------- Logging -------------------------------------
 def configure_logging(level_name: Optional[str] = None) -> None:
@@ -225,15 +242,21 @@ def set_verbosity(verbosity: Optional[str]) -> None:
     v = (verbosity or os.getenv("DDOSIM_VERBOSITY", "quiet")).lower()
     VERBOSITY = v
     if v == "quiet":
-        configure_logging("INFO");  PRINT_CHILD_OUTPUT = False
+        configure_logging("INFO")
+        PRINT_CHILD_OUTPUT = False
     elif v == "info":
-        configure_logging("INFO");  PRINT_CHILD_OUTPUT = False
+        configure_logging("INFO")
+        PRINT_CHILD_OUTPUT = False
     elif v == "verbose":
-        configure_logging("INFO");  PRINT_CHILD_OUTPUT = True
+        configure_logging("INFO")
+        PRINT_CHILD_OUTPUT = True
     elif v == "debug":
-        configure_logging("DEBUG"); PRINT_CHILD_OUTPUT = True
+        configure_logging("DEBUG")
+        PRINT_CHILD_OUTPUT = True
     else:
-        configure_logging("INFO");  PRINT_CHILD_OUTPUT = False
+        configure_logging("INFO")
+        PRINT_CHILD_OUTPUT = False
+
 
 # ------------------------------- Config --------------------------------------
 def load_config() -> None:
@@ -254,10 +277,12 @@ def load_config() -> None:
     try:
         try:
             import yaml  # type: ignore
+
             with open(conf_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
         except Exception:
             import json
+
             with open(conf_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
     except Exception as e:
@@ -283,7 +308,6 @@ def ensure_results_dir() -> None:
     global RESULTS_DIR, LOG_DIR
     RESULTS_DIR = os.path.join(REPO_ROOT, CONFIG["paths"]["results_subdir"])
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    # Log directory per run
     LOG_DIR = os.path.join(RESULTS_DIR, "logs", RUN_ID)
     os.makedirs(LOG_DIR, exist_ok=True)
     LOGGER.debug("Results directory: %s", RESULTS_DIR)
@@ -291,9 +315,7 @@ def ensure_results_dir() -> None:
 
 
 def _write_log(label: Optional[str], content: Optional[str]) -> None:
-    if not label or not content:
-        return
-    if not LOG_DIR:
+    if not label or not content or not LOG_DIR:
         return
     try:
         path = os.path.join(LOG_DIR, f"{label}.log")
@@ -305,8 +327,14 @@ def _write_log(label: Optional[str], content: Optional[str]) -> None:
         pass
 
 
-def run(cmd: str, *, check: bool = True, shell: bool = True, label: Optional[str] = None,
-        force_capture: Optional[bool] = None) -> subprocess.CompletedProcess:
+def run(
+    cmd: str,
+    *,
+    check: bool = True,
+    shell: bool = True,
+    label: Optional[str] = None,
+    force_capture: Optional[bool] = None,
+) -> subprocess.CompletedProcess:
     """
     Wrapper around subprocess.run with consistent logging and error handling.
     - If PRINT_CHILD_OUTPUT is False (quiet/info), capture output and save to logs.
@@ -317,10 +345,12 @@ def run(cmd: str, *, check: bool = True, shell: bool = True, label: Optional[str
     LOGGER.debug("Running: %s", cmd)
     try:
         cp = subprocess.run(
-            cmd, shell=shell, check=check,
+            cmd,
+            shell=shell,
+            check=check,
             stdout=(subprocess.PIPE if capture else None),
             stderr=(subprocess.STDOUT if capture else None),
-            text=True
+            text=True,
         )
         if capture and label:
             _write_log(label, cp.stdout or "")
@@ -328,8 +358,13 @@ def run(cmd: str, *, check: bool = True, shell: bool = True, label: Optional[str
     except subprocess.CalledProcessError as e:
         if capture and label:
             _write_log(label, e.stdout or "")
-        if capture and (e.stdout):
-            LOGGER.error("Command failed: %s\nSee log: %s/%s.log", cmd, LOG_DIR, label or "step")
+        if capture and e.stdout:
+            LOGGER.error(
+                "Command failed: %s\nSee log: %s/%s.log",
+                cmd,
+                LOG_DIR,
+                label or "step",
+            )
         else:
             LOGGER.error("Command failed (rc=%s): %s", e.returncode, cmd)
         if check:
@@ -338,7 +373,12 @@ def run(cmd: str, *, check: bool = True, shell: bool = True, label: Optional[str
 
 
 def get_container_pid(name: str) -> Optional[str]:
-    cp = run(f"docker inspect --format '{{{{ .State.Pid }}}}' {name}", check=False, label="docker_inspect", force_capture=True)
+    cp = run(
+        f"docker inspect --format '{{{{ .State.Pid }}}}' {name}",
+        check=False,
+        label="docker_inspect",
+        force_capture=True,
+    )
     if isinstance(cp, subprocess.CalledProcessError):
         return None
     pid = (cp.stdout or "").strip()
@@ -367,7 +407,7 @@ def max_node_index_in_pids() -> int:
         candidates = []
         for name in os.listdir(PIDS_DIR):
             if name.startswith(CONTAINER_BASENAME):
-                tail = name[len(CONTAINER_BASENAME):]
+                tail = name[len(CONTAINER_BASENAME) :]
                 if tail.isdigit():
                     candidates.append(int(tail))
         return max(candidates) if candidates else 0
@@ -381,25 +421,115 @@ def verify_expected_node_count() -> None:
         sys.exit(2)
     docker_files = max_node_index_in_pids()
     if docker_files != NUM_NODES:
-        LOGGER.error("Expected %d nodes for this run; found %d. Run with '-d %d' or use 'destroy' to reset.",
-                     NUM_NODES, docker_files, docker_files)
-
+        LOGGER.error(
+            "Expected %d nodes for this run; found %d. Run with '-d %d' or use 'destroy' to reset.",
+            NUM_NODES,
+            docker_files,
+            docker_files,
+        )
         sys.exit(2)
+
+
+# -------- ns-3 version & layout helpers (use install.sh conventions) ---------
+def _parse_semver(ver: str) -> tuple[int, int, int]:
+    """
+    Parse '3.46.1' -> (3, 46, 1); tolerate simple suffixes (e.g., '3.46.1-rc1').
+    """
+    parts = ver.strip().split(".")
+    nums = []
+    for p in parts:
+        if p.isdigit():
+            nums.append(int(p))
+        else:
+            digits = []
+            for ch in p:
+                if ch.isdigit():
+                    digits.append(ch)
+                else:
+                    break
+            if digits:
+                nums.append(int("".join(digits)))
+            break
+    while len(nums) < 3:
+        nums.append(0)
+    return nums[0], nums[1], nums[2]
+
+
+def _ns3_home_from_version(repo_root: str, version: str) -> Path:
+    """
+    Compute NS3_HOME based on version and layout:
+    - For ns-3 < 3.35  : network/ns-allinone-X.YY/ns-X.YY
+    - For ns-3 >= 3.35 : network/ns-X.YY[.Z]
+    """
+    major, minor, _ = _parse_semver(version)
+    if major == 3 and minor < 35:
+        return (
+            Path(repo_root)
+            / "network"
+            / f"ns-allinone-{version}"
+            / f"ns-{version}"
+        )
+    else:
+        return Path(repo_root) / "network" / f"ns-{version}"
 
 
 def set_env_ns3_home() -> None:
+    """
+    Set NS3_HOME and NS3_VERSION based on network/ns3_version and on-disk layout.
+
+    Behavior:
+    - If network/ns3_version is missing: instruct user to run ./install.sh.
+    - If empty: same.
+    - Compute expected ns-3 directory using version & layout rules.
+    - If directory or ./ns3 launcher is missing: instruct user to run ./install.sh
+      (optionally with --ns3-version <value>).
+    """
     global NS3_VERSION, NS3_HOME_ENV
-    version_file = os.path.join(REPO_ROOT, "network", "ns3_version")
-    if not os.path.exists(version_file):
-        LOGGER.error("Missing file: %s", version_file)
+
+    version_file = Path(REPO_ROOT) / "network" / "ns3_version"
+    if not version_file.is_file():
+        LOGGER.error(
+            "Missing ns-3 version file: %s\n"
+            "Please run ./install.sh first to install and configure ns-3.",
+            version_file,
+        )
         sys.exit(2)
 
-    with open(version_file, "r", encoding="utf-8") as f:
-        NS3_VERSION = f.readline().strip()
+    NS3_VERSION = version_file.read_text(encoding="utf-8").strip()
+    if not NS3_VERSION:
+        LOGGER.error(
+            "File %s is empty. Please run ./install.sh --ns3-version <X.YY> "
+            "to select and install ns-3.",
+            version_file,
+        )
+        sys.exit(2)
 
-    NS3_HOME_ENV = os.path.join(REPO_ROOT, "network", f"ns-allinone-{NS3_VERSION}", f"ns-{NS3_VERSION}")
+    ns3_home_path = _ns3_home_from_version(REPO_ROOT, NS3_VERSION)
+
+    if not ns3_home_path.is_dir():
+        LOGGER.error(
+            "Expected ns-3 directory not found: %s\n"
+            "Please run ./install.sh --ns3-version %s (or ./install.sh) "
+            "to install ns-3 for this project.",
+            ns3_home_path,
+            NS3_VERSION,
+        )
+        sys.exit(2)
+
+    ns3_launcher = ns3_home_path / "ns3"
+    if not ns3_launcher.exists():
+        LOGGER.error(
+            "ns-3 launcher script not found at: %s\n"
+            "Please rerun ./install.sh for ns-3 version %s.",
+            ns3_launcher,
+            NS3_VERSION,
+        )
+        sys.exit(2)
+
+    NS3_HOME_ENV = str(ns3_home_path)
     os.environ["NS3_HOME"] = NS3_HOME_ENV
     os.environ["DOCKER_CLI_EXPERIMENTAL"] = "enabled"
+    LOGGER.debug("NS3_HOME set to %s (version %s)", NS3_HOME_ENV, NS3_VERSION)
 
 
 def pid_exists(pid: int) -> bool:
@@ -411,10 +541,8 @@ def pid_exists(pid: int) -> bool:
 
 
 def ensure_sudo() -> None:
-    """Ensure we have a valid sudo timestamp; prompt the user if needed.
-    - First try non-interactive check (sudo -vn).
-    - If missing, run interactive 'sudo -v' so the user can enter a password.
-    - On success, subsequent sudo calls should not prompt for a while.
+    """
+    Ensure we have a valid sudo timestamp; prompt the user if needed.
     """
     cp = subprocess.run("sudo -vn", shell=True)
     if cp.returncode != 0:
@@ -425,48 +553,142 @@ def ensure_sudo() -> None:
             sys.exit(2)
         LOGGER.debug("Sudo credentials cached.")
 
+
 # -------------------------- Setup / Build ------------------------------------
 def build_images_and_ns3() -> None:
-    # Docker builds (logs captured unless verbose/debug)
-    run(f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load -t {CONFIG['images']['tserver']} docker/TServer/.",
-        label="build_tserver")
-    run(f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load -t {CONFIG['images']['attacker']} docker/Attacker/.",
-        label="build_attacker")
-    run(f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load -t {CONFIG['images']['ids']} docker/IDS/.",
-        label="build_ids")
-    run(f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load -t {CONFIG['images']['dev']} docker/Devs/.",
-        label="build_dev")
+    """
+    Build all Docker images and ensure ns-3 is configured with the correct scenario.
 
-    # ns-3 dir check
-    rc = subprocess.run('[ -d "$NS3_HOME" ]', shell=True).returncode
-    if rc != 0:
-        LOGGER.error("Unable to find ns-3 at %s ; ensure install.sh was run.", os.environ.get("NS3_HOME", ""))
+    For ns-3:
+      - Layout is derived from NS3_VERSION + set_env_ns3_home():
+          * < 3.35  : network/ns-allinone-X.YY/ns-X.YY
+          * >= 3.35 : network/ns-X.YY[.Z]
+      - For < 3.35 we keep using legacy network/update.sh.
+      - For >= 3.35 we copy the scenario file directly to $NS3_HOME/scratch/tap-vm.cc.
+    """
+    # -------- Docker images --------
+    run(
+        f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load "
+        f"-t {CONFIG['images']['tserver']} docker/TServer/.",
+        label="build_tserver",
+    )
+    run(
+        f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load "
+        f"-t {CONFIG['images']['attacker']} docker/Attacker/.",
+        label="build_attacker",
+    )
+    run(
+        f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load "
+        f"-t {CONFIG['images']['ids']} docker/IDS/.",
+        label="build_ids",
+    )
+    run(
+        f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load "
+        f"-t {CONFIG['images']['dev']} docker/Devs/.",
+        label="build_dev",
+    )
+
+    # -------- ns-3 presence check --------
+    if not NS3_HOME_ENV:
+        LOGGER.error(
+            "NS3_HOME is not set. Ensure set_env_ns3_home() was called before "
+            "build_images_and_ns3()."
+        )
         sys.exit(2)
 
-    # Copy latest scratch
-    if CONFIG["network_type"] == "wifi":
-        run(f"cd network && bash update.sh tap-wifi-virtual-machine.cc {NS3_VERSION}", label="ns3_update_wifi")
+    if subprocess.run('[ -d "$NS3_HOME" ]', shell=True).returncode != 0:
+        LOGGER.error(
+            "Unable to find ns-3 at %s ; ensure ./install.sh was run.",
+            os.environ.get("NS3_HOME", ""),
+        )
+        sys.exit(2)
+
+    # -------- Install / update scenario into ns-3 scratch --------
+    major, minor, _ = _parse_semver(NS3_VERSION)
+
+    # Scenario file in repo
+    scenario_src_name = (
+        "tap-wifi-virtual-machine.cc"
+        if CONFIG["network_type"] == "wifi"
+        else "tap-csma-virtual-machine.cc"
+    )
+    scenario_src = Path(REPO_ROOT) / "network" / scenario_src_name
+
+    if not scenario_src.is_file():
+        LOGGER.error(
+            "Missing ns-3 scenario file: %s\n"
+            "Make sure this file exists in the 'network' directory.",
+            scenario_src,
+        )
+        sys.exit(2)
+
+    # Legacy layout (< 3.35): keep using update.sh (ns-allinone style)
+    if major == 3 and minor < 35:
+        LOGGER.debug(
+            "ns-3 version %s detected as < 3.35; using legacy update.sh.",
+            NS3_VERSION,
+        )
+        if CONFIG["network_type"] == "wifi":
+            run(
+                f"cd network && bash update.sh tap-wifi-virtual-machine.cc {NS3_VERSION}",
+                label="ns3_update_wifi",
+            )
+        else:
+            run(
+                f"cd network && bash update.sh tap-csma-virtual-machine.cc {NS3_VERSION}",
+                label="ns3_update_csma",
+            )
     else:
-        run(f"cd network && bash update.sh tap-csma-virtual-machine.cc {NS3_VERSION}", label="ns3_update_csma")
+        # Modern layout (>= 3.35): copy directly into $NS3_HOME/scratch/tap-vm.cc
+        ns3_scratch = Path(NS3_HOME_ENV) / "scratch"
+        ns3_scratch.mkdir(parents=True, exist_ok=True)
 
-    LOGGER.info("ns-3 up to date!")
-    LOGGER.info("cd %s", os.environ["NS3_HOME"])
+        dst = ns3_scratch / "tap-vm.cc"
+        try:
+            shutil.copyfile(scenario_src, dst)
+        except Exception as e:
+            LOGGER.error(
+                "Failed to copy scenario into ns-3 scratch:\n  %s -> %s\nError: %s",
+                scenario_src,
+                dst,
+                e,
+            )
+            sys.exit(2)
 
-    # Build ns-3
-    rc = run(f"cd $NS3_HOME && ./ns3 build -j {CONFIG['build_jobs']}", check=False, label="ns3_build").returncode
+        LOGGER.info(
+            "ns-3 scenario updated: %s -> %s (layout >= 3.35, no ns-allinone).",
+            scenario_src_name,
+            dst,
+        )
+
+    LOGGER.info("ns-3 up to date (version %s; NS3_HOME=%s)", NS3_VERSION, NS3_HOME_ENV)
+
+    # -------- Build ns-3 --------
+    rc = run(
+        f"cd $NS3_HOME && ./ns3 build -j {CONFIG['build_jobs']}",
+        check=False,
+        label="ns3_build",
+    ).returncode
+
     if rc != 0:
-        LOGGER.warning("ns-3 build failed; attempting reconfigure and rebuild...")
+        LOGGER.warning("ns-3 build failed; attempting clean reconfigure + rebuild...")
         run(
-            "cd $NS3_HOME && ./ns3 clean && ./ns3 distclean && "
-            "./ns3 configure --enable-sudo --disable-examples --disable-tests --disable-python "
-            f"--build-profile=optimized && ./ns3 build -j {CONFIG['build_jobs']}",
-            label="ns3_build_reconfig"
+            "cd $NS3_HOME && "
+            "./ns3 clean || true && "
+            "./ns3 distclean || true && "
+            "./ns3 configure --enable-sudo --disable-examples --disable-tests "
+            "--disable-python --build-profile=optimized && "
+            f"./ns3 build -j {CONFIG['build_jobs']}",
+            label="ns3_build_reconfig",
         )
     else:
-        # When not verbose, capture a short cmake/ninja status to log file
-        _ = run(f"cd $NS3_HOME && echo 'Build OK at '$(date)", label="ns3_build_status", force_capture=True)
+        _ = run(
+            "cd $NS3_HOME && echo 'Build OK at '$(date)",
+            label="ns3_build_status",
+            force_capture=True,
+        )
 
-    LOGGER.info("ns-3 Build finished | %s", datetime.datetime.now())
+    LOGGER.info("ns-3 build finished | %s", datetime.datetime.now())
 
 
 def docker_label_flags(role: str) -> str:
@@ -476,20 +698,23 @@ def docker_label_flags(role: str) -> str:
         f'--label {LABEL_RUN_KEY}="{RUN_ID}"'
     )
 
+
 def docker_common_flags(role: str) -> str:
     """
-    Common Docker run flags used for all roles.
-    - role: used for labeling (via docker_label_flags)
+    Common docker run flags for all roles.
     """
-    return " ".join([
-        "--platform linux/amd64",
-        "--restart=always",
-        "--sysctl net.ipv6.conf.all.disable_ipv6=0",
-        "--privileged",   # if you ever drop this, add --cap-add=NET_ADMIN for shapers
-        "-dit",
-        "--net=none",
-        docker_label_flags(role),
-    ])
+    return " ".join(
+        [
+            "--platform linux/amd64",
+            "--restart=always",
+            "--sysctl net.ipv6.conf.all.disable_ipv6=0",
+            "--privileged",
+            "-dit",
+            "--net=none",
+            docker_label_flags(role),
+        ]
+    )
+
 
 def start_role_containers() -> None:
     acc = 0
@@ -498,26 +723,32 @@ def start_role_containers() -> None:
 
     # TServer (receiver)
     acc += run(
-        " ".join([
-            "docker run",
-            docker_common_flags("tserver"),
-            f"--mount type=bind,src={shq(str(dataset))},dst=/srv/www,ro",
-            "--mount type=tmpfs,target=/dev/shm/ftp,tmpfs-size=64m",
-            f"--name {CONTAINER_NAMES[1]}",
-            CONFIG["images"]["tserver"],
-        ]),
-        check=False, label="docker_run_tserver"
+        " ".join(
+            [
+                "docker run",
+                docker_common_flags("tserver"),
+                f"--mount type=bind,src={shq(str(dataset))},dst=/srv/www,ro",
+                "--mount type=tmpfs,target=/dev/shm/ftp,tmpfs-size=64m",
+                f"--name {CONTAINER_NAMES[1]}",
+                CONFIG["images"]["tserver"],
+            ]
+        ),
+        check=False,
+        label="docker_run_tserver",
     ).returncode
 
     # Attacker
     acc += run(
-        " ".join([
-            "docker run",
-            docker_common_flags("attacker"),
-            f"--name {CONTAINER_NAMES[2]}",
-            CONFIG["images"]["attacker"],
-        ]),
-        check=False, label="docker_run_attacker"
+        " ".join(
+            [
+                "docker run",
+                docker_common_flags("attacker"),
+                f"--name {CONTAINER_NAMES[2]}",
+                CONFIG["images"]["attacker"],
+            ]
+        ),
+        check=False,
+        label="docker_run_attacker",
     ).returncode
 
     # IDS
@@ -525,35 +756,33 @@ def start_role_containers() -> None:
     ids_dataset.mkdir(parents=True, exist_ok=True)
 
     acc += run(
-        " ".join([
-            "docker run",
-            docker_common_flags("ids"),
-            f"--mount type=bind,src={shq(str(ids_dataset))},dst=/dataset,ro",
-            f"--name {CONTAINER_NAMES[3]}",
-            CONFIG["images"]["ids"],
-        ]),
-        check=False, label="docker_run_ids"
+        " ".join(
+            [
+                "docker run",
+                docker_common_flags("ids"),
+                f"--mount type=bind,src={shq(str(ids_dataset))},dst=/dataset,ro",
+                f"--name {CONTAINER_NAMES[3]}",
+                CONFIG["images"]["ids"],
+            ]
+        ),
+        check=False,
+        label="docker_run_ids",
     ).returncode
 
-    # Devs (N devices) — read-only video corpus at /data
-
-    # docker run \
-    #   -v /path/to/videos:/data \
-    #  -e SERVER_IP=10.0.0.1 \
-    #  -e BW_RERANDOMIZE=true -e BW_RERANDOMIZE_MINUTES=10
-    #  -e PAUSE_BETWEEN_FILES=true -e PAUSE_MAX_SECS=3
-    #  -e APP_CMD=run_ffmpeg #(or run_curl_http, run_curl_ftp)
-
+    # Devs (IoT devices)
     for i in range(NUM_INFRA_NODES + 1, NUM_NODES + 1):
         acc += run(
-            " ".join([
-                "docker run",
-                docker_common_flags("dev"),
-                f"--mount type=bind,src={shq(str(dataset))},dst=/data,ro",
-                f"--name {CONTAINER_NAMES[i]}",
-                CONFIG["images"]["dev"],
-            ]),
-            check=False, label=f"docker_run_dev_{i}"
+            " ".join(
+                [
+                    "docker run",
+                    docker_common_flags("dev"),
+                    f"--mount type=bind,src={shq(str(dataset))},dst=/data,ro",
+                    f"--name {CONTAINER_NAMES[i]}",
+                    CONFIG["images"]["dev"],
+                ]
+            ),
+            check=False,
+            label=f"docker_run_dev_{i}",
         ).returncode
 
     if acc != 0:
@@ -567,14 +796,23 @@ def start_role_containers() -> None:
 def setup_ns3_taps_and_bridges() -> None:
     acc = 0
     for i in range(1, NUM_NODES + 1):
-        acc += run(f"{_conn_env_prefix()} bash connections/singleSetup.sh {CONTAINER_NAMES[i]}{_conn_verbose_flag()}",
-                   check=False, label=f"tap_setup_{i}").returncode
+        acc += run(
+            f"{_conn_env_prefix()} bash connections/singleSetup.sh "
+            f"{CONTAINER_NAMES[i]}{_conn_verbose_flag()}",
+            check=False,
+            label=f"tap_setup_{i}",
+        ).returncode
     if acc != 0:
         LOGGER.error("Error creating bridge and tap interfaces")
         sys.exit(2)
 
-    acc += run(f"{_conn_env_prefix()} sudo bash connections/singleEndSetup.sh{_conn_verbose_flag()}",
-               check=False, label="tap_endsetup", force_capture=False).returncode
+    acc += run(
+        f"{_conn_env_prefix()} sudo bash connections/singleEndSetup.sh"
+        f"{_conn_verbose_flag()}",
+        check=False,
+        label="tap_endsetup",
+        force_capture=False,
+    ).returncode
     if acc != 0:
         LOGGER.error("Error finalizing bridges and tap interfaces")
         sys.exit(2)
@@ -584,8 +822,12 @@ def setup_ns3_taps_and_bridges() -> None:
         pid = get_container_pid(CONTAINER_NAMES[i])
         if pid:
             write_pidfile(CONTAINER_NAMES[i], pid)
-        acc += run(f"{_conn_env_prefix()} bash connections/container.sh {CONTAINER_NAMES[i]} {i}{_conn_verbose_flag()}",
-                   check=False, label=f"container_br_{i}").returncode
+        acc += run(
+            f"{_conn_env_prefix()} bash connections/container.sh "
+            f"{CONTAINER_NAMES[i]} {i}{_conn_verbose_flag()}",
+            check=False,
+            label=f"container_br_{i}",
+        ).returncode
 
     if acc != 0:
         LOGGER.error("Error creating container side bridges")
@@ -597,25 +839,23 @@ def setup_ns3_taps_and_bridges() -> None:
 def setup_ids_mirroring() -> None:
     """
     Prepare IDS container interfaces for passive capture/mirroring.
-    - Loads IFB if present (no-op if not available)
-    - Sets promisc and redirects ingress as needed
     """
-    # Do not abort if IFB is unavailable
     subprocess.run("sudo modprobe ifb || true", shell=True, check=False)
     subprocess.run(
         "PID=$(docker inspect --format '{{ .State.Pid }}' emu3) && "
         "sudo ip netns exec $PID ip link set dev eth0 promisc on up",
-        shell=True, check=False
+        shell=True,
+        check=False,
     )
-
-    # tc mirroring with idempotent guards
     subprocess.run(
         "sudo tc qdisc add dev tap-emu3 ingress 2>/dev/null || true && "
         "sudo tc filter add dev tap-emu3 parent ffff: protocol all u32 match u32 0 0 "
         "action mirred egress redirect dev si-emu3 2>/dev/null || true",
-        shell=True, check=False
+        shell=True,
+        check=False,
     )
     LOGGER.info("IDS mirroring configured.")
+
 
 # ----------------------------- Primary Ops -----------------------------------
 def create_environment() -> None:
@@ -625,7 +865,10 @@ def create_environment() -> None:
     if os.listdir(PIDS_DIR):
         running_count = max_node_index_in_pids()
         if running_count != 0:
-            LOGGER.error("There are %d node(s) running. Use 'destroy' first.", running_count)
+            LOGGER.error(
+                "There are %d node(s) running. Use 'destroy' first.",
+                running_count,
+            )
             return
 
     ensure_results_dir()
@@ -637,68 +880,97 @@ def create_environment() -> None:
     setup_ns3_taps_and_bridges()
     setup_ids_mirroring()
 
-    # Point user to logs when not streaming
     if not PRINT_CHILD_OUTPUT:
         LOGGER.info("Detailed step logs saved under: %s", LOG_DIR)
     LOGGER.info("Create: Done.")
 
 
 def run_ns3(return_proc: bool = False):
+    """
+    Start the ns-3 simulation using the configured NS3_HOME and scenario.
+
+    If return_proc is True, return the Popen object; otherwise detach after a brief
+    readiness delay. A PID file is written so 'destroy' can kill the whole group.
+    """
     verify_expected_node_count()
     ensure_sudo()
 
-    rc = subprocess.run('[ -d "$NS3_HOME" ]', shell=True).returncode
-    if rc != 0:
-        LOGGER.error("Unable to find ns-3 at %s ; ensure install.sh was run.", os.environ.get("NS3_HOME", ""))
+    # Ensure NS3_HOME is valid
+    if subprocess.run('[ -d "$NS3_HOME" ]', shell=True).returncode != 0:
+        LOGGER.error(
+            "Unable to find ns-3 at %s ; ensure install.sh was run.",
+            os.environ.get("NS3_HOME", ""),
+        )
         sys.exit(2)
 
+    # If ns-3 already running, do nothing
     existing_pid = read_pidfile("ns3")
     if existing_pid and pid_exists(existing_pid):
         LOGGER.info("ns-3 is still running with pid = %d", existing_pid)
         return None
 
-    LOGGER.info("About to start ns-3 with total emulation time of %s", EMULATION_TIME_SEC)
+    LOGGER.info(
+        "About to start ns-3 with total emulation time of %s seconds",
+        EMULATION_TIME_SEC,
+    )
 
     base = "cd $NS3_HOME && "
     if NETWORK_TYPE == "wifi":
         ns3_cmd = (
-            base + f'./ns3 run -j {BUILD_JOBS} '
-            f'"scratch/tap-vm --NumNodes={NUM_NODES} --TotalTime={EMULATION_TIME_SEC} '
-            f'--TapBaseName={CONTAINER_BASENAME} --DiskDistance={SCENARIO_SIZE_METERS} '
-            f'--Churn={CHURN_MODE} --FileLog={NS3_FILE_LOG_MODE} '
-            f'--WriteDirectory={RESULTS_DIR} --NoneDevsNodes={NUM_INFRA_NODES}"'
+            base
+            + f'./ns3 run -j {BUILD_JOBS} '
+              '"scratch/tap-vm '
+              f'--NumNodes={NUM_NODES} '
+              f'--TotalTime={EMULATION_TIME_SEC} '
+              f'--TapBaseName={CONTAINER_BASENAME} '
+              f'--DiskDistance={SCENARIO_SIZE_METERS} '
+              f'--Churn={CHURN_MODE} '
+              f'--FileLog={NS3_FILE_LOG_MODE} '
+              f'--WriteDirectory={RESULTS_DIR} '
+              f'--NoneDevsNodes={NUM_INFRA_NODES}"'
         )
     else:
         ns3_cmd = (
-            base + f'./ns3 run -j {BUILD_JOBS} '
-            f'"scratch/tap-vm --NumNodes={NUM_NODES} --TotalTime={EMULATION_TIME_SEC} '
-            f'--Churn={CHURN_MODE} --FileLog={NS3_FILE_LOG_MODE} '
-            f'--TapBaseName={CONTAINER_BASENAME} --WriteDirectory={RESULTS_DIR} '
-            f'--NoneDevsNodes={NUM_INFRA_NODES} --AnimationOn=false"'
+            base
+            + f'./ns3 run -j {BUILD_JOBS} '
+              '"scratch/tap-vm '
+              f'--NumNodes={NUM_NODES} '
+              f'--TotalTime={EMULATION_TIME_SEC} '
+              f'--Churn={CHURN_MODE} '
+              f'--FileLog={NS3_FILE_LOG_MODE} '
+              f'--TapBaseName={CONTAINER_BASENAME} '
+              f'--WriteDirectory={RESULTS_DIR} '
+              f'--NoneDevsNodes={NUM_INFRA_NODES} '
+              f'--AnimationOn=false"'
         )
 
     if PRINT_CHILD_OUTPUT:
         print(f"NS3_HOME={os.environ['NS3_HOME'].strip()} && {ns3_cmd}")
 
-    proc = subprocess.Popen(ns3_cmd, shell=True)
-    write_pidfile("ns3", proc.pid)
-    LOGGER.info("ns-3 started (pid=%s) | %s", proc.pid, datetime.datetime.now())
+    # IMPORTANT:
+    # Start ns-3 in its own process group so we can cleanly kill the whole group later.
+    proc = subprocess.Popen(
+        ns3_cmd,
+        shell=True,
+        preexec_fn=os.setsid,  # new process group (POSIX)
+    )
 
-    # If caller wants the proc, do NOT block here.
+    write_pidfile("ns3", str(proc.pid))
+    LOGGER.info("ns-3 started (pgid=%s) | %s", os.getpgid(proc.pid), datetime.datetime.now())
+
     if return_proc:
         return proc
 
+    # Give it a moment to spin up
     time.sleep(10)
     proc.poll()
 
-    # Interactive: pause until user confirms
     try:
         input("\nPress Enter to leave ns-3 running in the background…")
     except EOFError:
         pass
-    
-    LOGGER.info("Running ns-3 in the background | %s", datetime.datetime.now())
 
+    LOGGER.info("Running ns-3 in the background | %s", datetime.datetime.now())
     return None
 
 
@@ -721,16 +993,24 @@ def run_emulation() -> None:
     LOGGER.info("Restarting containers")
     acc = 0
     for i in range(1, NUM_NODES + 1):
-        acc += run(f"docker restart -t 0 {CONTAINER_NAMES[i]}", check=False, label=f"docker_restart_{i}").returncode
+        acc += run(
+            f"docker restart -t 0 {CONTAINER_NAMES[i]}",
+            check=False,
+            label=f"docker_restart_{i}",
+        ).returncode
 
     # Clean old netns and refresh PID files
-    rc = 0
     for i in range(1, NUM_NODES + 1):
         pidfile = os.path.join(PIDS_DIR, CONTAINER_NAMES[i])
         if os.path.exists(pidfile):
             with open(pidfile, "rt", encoding="utf-8") as f:
                 text = f.read().strip()
-            rc += run(f"sudo rm -rf /var/run/netns/{text}", check=False, label="netns_rm", force_capture=False).returncode
+            run(
+                f"sudo rm -rf /var/run/netns/{text}",
+                check=False,
+                label="netns_rm",
+                force_capture=False,
+            )
 
         pid = get_container_pid(CONTAINER_NAMES[i])
         if pid:
@@ -739,8 +1019,12 @@ def run_emulation() -> None:
     # Recreate container side bridges
     acc = 0
     for i in range(1, NUM_NODES + 1):
-        acc += run(f"{_conn_env_prefix()} bash connections/container.sh {CONTAINER_NAMES[i]} {i}{_conn_verbose_flag()}",
-                   check=False, label=f"container_br_{i}").returncode
+        acc += run(
+            f"{_conn_env_prefix()} bash connections/container.sh "
+            f"{CONTAINER_NAMES[i]} {i}{_conn_verbose_flag()}",
+            check=False,
+            label=f"container_br_{i}",
+        ).returncode
 
     LOGGER.info("Emulation running | %s", datetime.datetime.now())
     LOGGER.info("Letting the simulation run for %s", EMULATION_TIME_SEC)
@@ -758,33 +1042,54 @@ def run_emulation() -> None:
 
 
 def destroy_environment() -> None:
+    """
+    Tear down ns-3, containers, taps, bridges, and netns state.
+
+    Robust against partially running ns-3; uses process groups so that the
+    simulator cannot outlive its launcher and spam TapBridge aborts during teardown.
+    """
     LOGGER.info("Destroying environment...")
     ensure_sudo()
 
+    # --- Stop ns-3 (if running) using process group ---
     ns3_pid = read_pidfile("ns3")
     if ns3_pid and os.path.exists(f"/proc/{ns3_pid}"):
-        LOGGER.info("ns-3 is running ... terminating process %s", ns3_pid)
         try:
-            os.kill(ns3_pid, signal.SIGTERM)
-        except Exception as ex:
-            LOGGER.warning("SIGTERM failed for ns-3 (pid=%s): %s", ns3_pid, ex)
-        # wait a bit, then SIGKILL if still alive
-        for _ in range(10):
-            if not os.path.exists(f"/proc/{ns3_pid}"):
-                break
-            time.sleep(0.2)
-        if os.path.exists(f"/proc/{ns3_pid}"):
-            LOGGER.warning("ns-3 still alive; sending SIGKILL")
+            ns3_pid_int = int(ns3_pid)
+        except ValueError:
+            ns3_pid_int = None
+
+        if ns3_pid_int:
             try:
-                os.kill(ns3_pid, signal.SIGKILL)
-            except Exception:
-                pass
+                pgid = os.getpgid(ns3_pid_int)
+                LOGGER.info("ns-3 is running ... terminating process group %s", pgid)
+                # First try a graceful group SIGTERM
+                os.killpg(pgid, signal.SIGTERM)
+            except Exception as ex:
+                LOGGER.warning("SIGTERM to ns-3 process group failed: %s", ex)
+
+            # Wait briefly for group to exit
+            for _ in range(20):
+                if not os.path.exists(f"/proc/{ns3_pid_int}"):
+                    break
+                time.sleep(0.2)
+
+            # If still alive, force kill the group
+            if os.path.exists(f"/proc/{ns3_pid_int}"):
+                try:
+                    LOGGER.warning("ns-3 still alive; sending SIGKILL to process group")
+                    os.killpg(os.getpgid(ns3_pid_int), signal.SIGKILL)
+                except Exception:
+                    pass
+
+        # Clean ns3 pid file and ifb module (mirror)
         try:
             os.remove(os.path.join(PIDS_DIR, "ns3"))
         except Exception:
             pass
         subprocess.run("sudo modprobe -r ifb || true", shell=True, check=False)
 
+    # --- Stop & remove labeled containers ---
     scope = CONFIG.get("destroy_scope", "project")
     project_filter = f"--filter label={LABEL_PROJECT_KEY}={CONFIG['project_label']}"
     run_filter = f"--filter label={LABEL_RUN_KEY}={RUN_ID}"
@@ -793,28 +1098,44 @@ def destroy_environment() -> None:
     if scope == "run":
         filters += f" {run_filter}"
 
-    cp = subprocess.run(f"docker ps -a -q {filters}", shell=True, stdout=subprocess.PIPE, text=True)
+    cp = subprocess.run(
+        f"docker ps -a -q {filters}",
+        shell=True,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
     ids = (cp.stdout or "").strip().replace("\n", " ")
     if ids:
-        run(f"docker stop {ids}", check=False, label="docker_stop")
-        run(f"docker rm {ids}", check=False, label="docker_rm")
+        run("docker stop " + ids, check=False, label="docker_stop")
+        run("docker rm " + ids, check=False, label="docker_rm")
         LOGGER.info("Stopped and removed containers with %s", filters)
     else:
         LOGGER.info("No labeled containers found to remove (%s)", filters)
 
-    rc = 0
+    # --- Tear down taps/bridges (best-effort, log to files to avoid scary spam) ---
     for i in range(1, NUM_NODES + 1):
-        rc += run(f"{_conn_env_prefix()} bash connections/singleDestroy.sh {CONTAINER_NAMES[i]}{_conn_verbose_flag()}",
-                  check=False, label=f"single_destroy_{i}").returncode
+        run(
+            f"{_conn_env_prefix()} bash connections/singleDestroy.sh "
+            f"{CONTAINER_NAMES[i]}{_conn_verbose_flag()}",
+            check=False,
+            label=f"single_destroy_{i}",
+            force_capture=True,  # keep TapBridge abort traces out of stdout
+        )
 
-    rc2 = 0
+    # --- Remove per-container netns links ---
     for i in range(1, NUM_NODES + 1):
         pidfile = os.path.join(PIDS_DIR, CONTAINER_NAMES[i])
         if os.path.exists(pidfile):
             with open(pidfile, "rt", encoding="utf-8") as f:
                 text = f.read().strip()
-            rc2 += run(f"sudo rm -rf /var/run/netns/{text}", check=False, label="netns_rm", force_capture=False).returncode
+            run(
+                f"sudo rm -rf /var/run/netns/{text}",
+                check=False,
+                label="netns_rm",
+                force_capture=False,
+            )
 
+    # --- Clean pidfiles directory ---
     for i in range(1, NUM_NODES + 1):
         pidfile = os.path.join(PIDS_DIR, CONTAINER_NAMES[i])
         if os.path.exists(pidfile):
@@ -834,14 +1155,11 @@ def destroy_environment() -> None:
 
 # --------------------------------- CLI ---------------------------------------
 def parse_args():
-    """
-    CLI parser
-    """
     epilog = """
 Examples:
   {prog} create          # build images, set up taps/bridges, start containers
-  {prog} ns3             # run only the ns-3 side (waits for Enter once ready)
-  {prog} emulation       # restart containers, reconnect taps, and run end-to-end
+  {prog} ns3             # run only ns-3 (waits for Enter once ready)
+  {prog} emulation       # restart containers, reconnect taps, run end-to-end
   {prog} destroy         # stop and remove labeled DDoSim containers and taps
 
 Tips:
@@ -850,61 +1168,122 @@ Tips:
       -v info     | -v verbose     | -v quiet
   • Config file: config.yaml (or set DDOSIM_CONFIG=/path/to/file).
   • Colors: --color auto|always|never.
-""".format(prog=os.path.basename(sys.argv[0]))
-    parser = DDoSimArgumentParser(
-        description=_c("DDoSim Orchestrator (Docker + ns-3)", _Ansi.BOLD) if ENABLE_COLOR else "DDoSim Orchestrator (Docker + ns-3)",
-        add_help=True,
-        formatter_class=ColorHelpFormatter,
-        epilog=epilog
+""".format(
+        prog=os.path.basename(sys.argv[0])
     )
 
-    # COMMAND
-    parser.add_argument("operation", type=str,
-                        choices=["create", "ns3", "emulation", "destroy"],
-                        help="Operation to perform: create, ns3, emulation, destroy")
+    parser = DDoSimArgumentParser(
+        description=_c(
+            "DDoSim Orchestrator (Docker + ns-3)", _Ansi.BOLD
+        )
+        if ENABLE_COLOR
+        else "DDoSim Orchestrator (Docker + ns-3)",
+        add_help=True,
+        formatter_class=ColorHelpFormatter,
+        epilog=epilog,
+    )
 
-    # OPTIONS
-    parser.add_argument("-d", "--devs", "--dev-count", dest="devs", type=int, help="Number of Devs in the simulation")
-    parser.add_argument("-t", "--time", "--sim-time", dest="time", type=int, help="NS3 simulation time in seconds")
-    parser.add_argument("-n", "--network", "--net-type", dest="network", type=str, choices=["csma", "wifi"],
-                        help="Network type")
-    parser.add_argument("-c", "--churn", "--churn-mode", dest="churn", type=str, choices=["0", "1", "2"],
-                        help="Nodes churn: 0=no churn, 1=static, 2=dynamic")
-    parser.add_argument("-l", "--log", "--ns3-file-log", dest="log", type=str, choices=["0", "1", "2"],
-                        help="NS3 log to files: 0=off, 1=pcap only, 2=pcap+stats")
-    parser.add_argument("-s", "--size", "--scenario-size", dest="size", help="Scenario size (meters) for wifi network")
-    parser.add_argument("-j", "--jobs", "--build-jobs", dest="jobs", type=int, help="Number of parallel build jobs")
-    parser.add_argument("--destroy-scope", choices=["project", "run", "all"],
-                        help="Destroy only current run's containers, all project containers, or every ddosim container")
-    parser.add_argument("--color", choices=["auto","always","never"], default="auto",
-                        help="Colorize console output (default: auto)")
-
-    # Verbosity (requires explicit level)
     parser.add_argument(
-        "-v", "--verbosity",
+        "operation",
+        type=str,
+        choices=["create", "ns3", "emulation", "destroy"],
+        help="Operation to perform: create, ns3, emulation, destroy",
+    )
+
+    parser.add_argument(
+        "-d",
+        "--devs",
+        "--dev-count",
+        dest="devs",
+        type=int,
+        help="Number of Devs in the simulation",
+    )
+    parser.add_argument(
+        "-t",
+        "--time",
+        "--sim-time",
+        dest="time",
+        type=int,
+        help="NS3 simulation time in seconds",
+    )
+    parser.add_argument(
+        "-n",
+        "--network",
+        "--net-type",
+        dest="network",
+        type=str,
+        choices=["csma", "wifi"],
+        help="Network type",
+    )
+    parser.add_argument(
+        "-c",
+        "--churn",
+        "--churn-mode",
+        dest="churn",
+        type=str,
+        choices=["0", "1", "2"],
+        help="Nodes churn: 0=no churn, 1=static, 2=dynamic",
+    )
+    parser.add_argument(
+        "-l",
+        "--log",
+        "--ns3-file-log",
+        dest="log",
+        type=str,
+        choices=["0", "1", "2"],
+        help="NS3 log to files: 0=off, 1=pcap only, 2=pcap+stats",
+    )
+    parser.add_argument(
+        "-s",
+        "--size",
+        "--scenario-size",
+        dest="size",
+        help="Scenario size (meters) for wifi network",
+    )
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        "--build-jobs",
+        dest="jobs",
+        type=int,
+        help="Number of parallel build jobs",
+    )
+    parser.add_argument(
+        "--destroy-scope",
+        choices=["project", "run", "all"],
+        help=(
+            "Destroy only current run's containers, all project containers, "
+            "or every ddosim container"
+        ),
+    )
+    parser.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="Colorize console output (default: auto)",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbosity",
         choices=["quiet", "info", "verbose", "debug"],
         help="Console output verbosity level (default: quiet)",
     )
 
-    # If invoked without arguments, show help.
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(2)
 
     return parser.parse_args()
 
+
 def main():
     """
-        Entry point for DDoSim Orchestrator.
-        - Parses CLI args and config
-        - Normalizes/validates key options (notably the number of Devs)
-        - Dispatches to the chosen operation
+    Entry point for DDoSim Orchestrator.
     """
     global NUM_DEVS, EMULATION_TIME_SEC, CHURN_MODE, NS3_FILE_LOG_MODE
     global NETWORK_TYPE, SCENARIO_SIZE_METERS, BUILD_JOBS, NUM_NODES, CONTAINER_NAMES
     global CONTAINER_BASENAME
 
-    # Configure logging early; adjust with verbosity next
     configure_logging()
     load_config()
 
@@ -915,31 +1294,24 @@ def main():
         LOGGER.info("Exiting...")
         sys.exit(0)
 
-    signal.signal(signal.SIGINT, _sig_handler)   # Ctrl+C
-    signal.signal(signal.SIGTSTP, _sig_handler)  # Ctrl+Z
-    signal.signal(signal.SIGQUIT, _sig_handler)  # Ctrl+\
+    signal.signal(signal.SIGINT, _sig_handler)
+    signal.signal(signal.SIGTSTP, _sig_handler)
+    signal.signal(signal.SIGQUIT, _sig_handler)
 
     args = parse_args()
 
-    # Apply color, then verbosity (verbosity configures formatter)
     set_color_mode(args.color)
     set_verbosity(args.verbosity)
 
-    # -----------------------------
-    # Apply config, then CLI overrides
-    # -----------------------------
-
-    # Dev count (Devs = IoT devices that generate traffic). They are required for both
-    # DDoS attack emulation and IDS evaluation. If the user passes "-d 0", we warn and
-    # proceed with 1 device for a usable default.
+    # -------- Apply CLI over config --------
     if args.devs is not None:
         requested = int(args.devs)
         if requested <= 0:
-            # Explicit user input "-d 0" (or negative) — warn and default to 1
             LOGGER.warning(
                 "IoT devices are required for the simulation. You provided '-d %d'. "
                 "Devs are needed for both DDoS attacks and IDS evaluation. "
-                "Proceeding with 1 device.", requested
+                "Proceeding with 1 device.",
+                requested,
             )
             CONFIG["num_devs"] = 1
         else:
@@ -960,40 +1332,37 @@ def main():
     if args.destroy_scope is not None:
         CONFIG["destroy_scope"] = args.destroy_scope
 
-    # Sync globals from CONFIG
+    # Sync globals
     NUM_DEVS = int(CONFIG.get("num_devs", 1))
     EMULATION_TIME_SEC = int(CONFIG.get("emulation_time_sec", EMULATION_TIME_SEC))
     CHURN_MODE = str(CONFIG.get("churn_mode", CHURN_MODE))
     NS3_FILE_LOG_MODE = str(CONFIG.get("ns3_file_log_mode", NS3_FILE_LOG_MODE))
-    SCENARIO_SIZE_METERS = str(CONFIG.get("scenario_size_meters", SCENARIO_SIZE_METERS))
+    SCENARIO_SIZE_METERS = str(
+        CONFIG.get("scenario_size_meters", SCENARIO_SIZE_METERS)
+    )
     NETWORK_TYPE = str(CONFIG.get("network_type", NETWORK_TYPE))
     BUILD_JOBS = int(CONFIG.get("build_jobs", BUILD_JOBS))
 
-    # Final safety net for invalid dev counts from config files/env (<= 0):
+    # Safety net: ensure at least 1 Dev
     if NUM_DEVS <= 0:
         LOGGER.warning(
-            "Configuration requested %d Devs (<= 0). IoT devices are required for the simulation. "
-            "Proceeding with 1 device.", NUM_DEVS
+            "Configuration requested %d Devs (<= 0). IoT devices are required "
+            "for the simulation. Proceeding with 1 device.",
+            NUM_DEVS,
         )
         NUM_DEVS = 1
         CONFIG["num_devs"] = 1
 
     CONTAINER_BASENAME = CONFIG["container_basename"]
     NUM_NODES = NUM_INFRA_NODES + NUM_DEVS
-
-    # Names: emu1=TServer, emu2=Attacker, emu3=IDS, emu4..=Devs
     CONTAINER_NAMES = [f"{CONTAINER_BASENAME}{i}" for i in range(0, NUM_NODES + 1)]
 
-    # Prepare results/log directories and NS-3 env (sanity checks)
+    # Ensure ns-3 environment and results dir before operations
     ensure_results_dir()
     set_env_ns3_home()
 
-    # Summarize the run context (colorized table)
     print_run_context(args.operation)
 
-    # -----------------------------
-    # Dispatch selected operation
-    # -----------------------------
     op = args.operation
     if op == "create":
         create_environment()
@@ -1004,7 +1373,9 @@ def main():
     elif op == "emulation":
         run_emulation()
     else:
-        print("Nothing to be done ...")
+        LOGGER.error("Unknown operation: %s", op)
+        sys.exit(2)
+
 
 if __name__ == "__main__":
     main()
