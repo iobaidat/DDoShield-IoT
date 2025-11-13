@@ -41,6 +41,7 @@ DEFAULTS: Dict[str, Any] = {
         "pids_dir": os.path.join(".", "var", "pid"),
     },
     "destroy_scope": "project",  # project | run | all
+    "dev_app": "all",            # app policy for Devs: all|ffmpeg|http|ftp
 }
 
 CONFIG: Dict[str, Any] = DEFAULTS.copy()
@@ -133,6 +134,7 @@ def print_run_context(op: str) -> None:
             else "dynamic churn",
         ),
         ("NS3 File Log", _ns3_log_label(NS3_FILE_LOG_MODE)),
+        ("Dev App Policy", CONFIG.get("dev_app", "all")),
         ("Project label", str(CONFIG["project_label"])),
         ("Destroy scope", str(CONFIG["destroy_scope"])),
         ("Run ID", RUN_ID),
@@ -430,7 +432,7 @@ def verify_expected_node_count() -> None:
         sys.exit(2)
 
 
-# -------- ns-3 version & layout helpers (use install.sh conventions) ---------
+# -------- ns-3 version & layout helpers ---------
 def _parse_semver(ver: str) -> tuple[int, int, int]:
     """
     Parse '3.46.1' -> (3, 46, 1); tolerate simple suffixes (e.g., '3.46.1-rc1').
@@ -553,6 +555,34 @@ def ensure_sudo() -> None:
             sys.exit(2)
         LOGGER.debug("Sudo credentials cached.")
 
+def ensure_kernel_modules() -> None:
+    """
+    Make sure kernel modules needed for mirroring/shaping are present on the host.
+    Safe to call repeatedly (idempotent). Works even if some modules are built-in.
+    """
+    cmds = [
+        "sudo modprobe sch_htb || true",               # egress qdisc
+        "sudo modprobe act_mirred || true",            # ingress redirect action
+        "sudo modprobe ifb numifbs=1 || sudo modprobe ifb || true",  # IFB device(s)
+    ]
+    for c in cmds:
+        subprocess.run(c, shell=True, check=False)
+
+
+# -------------------------- Dev app normalization ------------------------
+def normalize_dev_app(value: Optional[str]) -> str:
+    """
+    Normalize CLI/config app selection into:
+      'all' | 'run_ffmpeg' | 'run_curl_http' | 'run_curl_ftp'
+    """
+    if not value: return "all"
+    w = value.strip().lower()
+    if w in ("all", "any", "random"): return "all"
+    if w in ("ffmpeg", "run_ffmpeg"): return "run_ffmpeg"
+    if w in ("http", "run_curl_http", "curl_http"): return "run_curl_http"
+    if w in ("ftp", "run_curl_ftp", "curl_ftp"): return "run_curl_ftp"
+    return "all"
+
 
 # -------------------------- Setup / Build ------------------------------------
 def build_images_and_ns3() -> None:
@@ -658,7 +688,7 @@ def build_images_and_ns3() -> None:
         LOGGER.info(
             "ns-3 scenario updated: %s -> %s (layout >= 3.35, no ns-allinone).",
             scenario_src_name,
-            dst,
+            dst
         )
 
     LOGGER.info("ns-3 up to date (version %s; NS3_HOME=%s)", NS3_VERSION, NS3_HOME_ENV)
@@ -717,6 +747,12 @@ def docker_common_flags(role: str) -> str:
 
 
 def start_role_containers() -> None:
+    """
+    Start TServer, Attacker, IDS, and Dev containers.
+    For Devs, pass APP_CMD env so prep.sh can:
+      - enforce a specific app for all Devs (ffmpeg/http/ftp), or
+      - randomize per Dev and persist (all).
+    """
     acc = 0
     dataset = Path(REPO_ROOT) / "docker" / "videos"
     dataset.mkdir(parents=True, exist_ok=True)
@@ -770,6 +806,7 @@ def start_role_containers() -> None:
     ).returncode
 
     # Devs (N devices) — read-only video corpus at /data
+    #                  — pass APP_CMD
 
     # docker run \
     #   -v /path/to/videos:/data \
@@ -778,12 +815,14 @@ def start_role_containers() -> None:
     #  -e PAUSE_BETWEEN_FILES=true -e PAUSE_MAX_SECS=3
     #  -e APP_CMD=run_ffmpeg #(or run_curl_http, run_curl_ftp)
 
+    app_env = normalize_dev_app(CONFIG.get("dev_app", "all"))
     for i in range(NUM_INFRA_NODES + 1, NUM_NODES + 1):
         acc += run(
             " ".join(
                 [
                     "docker run",
                     docker_common_flags("dev"),
+                    f"--env APP_CMD={shq(app_env)}",
                     f"--mount type=bind,src={shq(str(dataset))},dst=/data,ro",
                     f"--name {CONTAINER_NAMES[i]}",
                     CONFIG["images"]["dev"],
@@ -847,8 +886,9 @@ def setup_ns3_taps_and_bridges() -> None:
 def setup_ids_mirroring() -> None:
     """
     Prepare IDS container interfaces for passive capture/mirroring.
+    Assumes ensure_kernel_modules() has been called.
     """
-    subprocess.run("sudo modprobe ifb || true", shell=True, check=False)
+    # subprocess.run("sudo modprobe ifb || true", shell=True, check=False)
     subprocess.run(
         "PID=$(docker inspect --format '{{ .State.Pid }}' emu3) && "
         "sudo ip netns exec $PID ip link set dev eth0 promisc on up",
@@ -882,6 +922,8 @@ def create_environment() -> None:
     ensure_results_dir()
     set_env_ns3_home()
     ensure_sudo()
+
+    ensure_kernel_modules()
 
     build_images_and_ns3()
     start_role_containers()
@@ -1174,6 +1216,7 @@ Tips:
   • Default verbosity is 'quiet' (clean console).
   • Use '-v debug' for maximum detail, or:
       -v info     | -v verbose     | -v quiet
+  • Choose Dev app behavior: -a all|ffmpeg|http|ftp (default: all)
   • Config file: config.yaml (or set DDOSIM_CONFIG=/path/to/file).
   • Colors: --color auto|always|never.
 """.format(
@@ -1275,6 +1318,13 @@ Tips:
         "--verbosity",
         choices=["quiet", "info", "verbose", "debug"],
         help="Console output verbosity level (default: quiet)",
+    )
+    parser.add_argument(
+        "-a",
+        "--app",
+        "--dev-app",
+        choices=["all","ffmpeg","http","ftp"],
+        help="App behavior for Devs: 'all' (default) = each Dev picks one randomly and persists; or force one: ffmpeg|http|ftp",
     )
 
     if len(sys.argv) == 1:

@@ -120,6 +120,35 @@ To Create a specific number of Devs (i.e., IoT Devices), use the following comma
 ./main.py -d 3 -v debug create
 ```
 
+#### Choose Dev traffic app (`-a`)
+
+By default, Devs choose **one** app at container start and **stick to it** for the whole run. You can force a specific app for **all** Devs or keep the default randomized behavior.
+
+**Behavior**
+
+* `-a all` (default): each Dev randomly selects one of `{ffmpeg, http, ftp}` at first start and uses it for the entire run.
+* `-a ffmpeg`: all Devs use RTMP push to **10.0.0.1:1935**.
+* `-a http`: all Devs repeatedly GET files from **10.0.0.1:80**.
+* `-a ftp`: all Devs repeatedly fetch files via FTP from **10.0.0.1:21**.
+
+**Examples**
+
+```bash
+# Random per-Dev (default)
+./main.py -d 3 -v debug create
+
+# Force HTTP for all Devs
+./main.py -d 3 -a http -v debug create
+
+# Force RTMP for all Devs
+./main.py -d 5 -a ffmpeg -v debug create
+```
+
+**Notes**
+
+* Dev containers mount a dataset at `/docker/videos` (configured by `main.py`); make sure your media files (e.g., `.mp4`) are available there so Devs have content to send.
+* The per-Dev app choice persists for the container lifetime. To reshuffle: run `destroy` and `create` again (or remove `/var/run/selected_app` inside a Dev).
+
 > **Note — First Run Takes Longer**
 > The very first `./main.py -d <N> create` (optionally with `-v debug`) can take a while
 > because Docker builds all node images (Attacker, Devs, TServer, IDS) and pulls base
@@ -273,6 +302,102 @@ ack 10.0.0.1 2 dport=22
 ```bash
 ./main.py -d 12 destroy
 ```
+
+---
+
+## Configuration (`config.yaml` / `config.conf` / `DDOSIM_CONFIG`)
+
+You can customize defaults (number of Devs, image names, logging, etc.) with a config file. By default, `main.py` looks for **`config.yaml`** in the repository root. You can also point to **any** file (YAML or JSON) using the `DDOSIM_CONFIG` environment variable.
+
+### Where to put it
+
+* **Default**: `./config.yaml` (project root)
+* **Custom location / filename**: set `DDOSIM_CONFIG=/path/to/your-config.conf` before running `main.py`.
+
+Examples:
+
+```bash
+# One-off run with a custom config path (YAML or JSON content)
+DDOSIM_CONFIG=/path/to/config.conf ./main.py -v info create
+
+# Make it permanent in your shell session
+export DDOSIM_CONFIG=$PWD/my-config.yaml
+./main.py ns3
+```
+
+> Note: The loader accepts YAML **or** JSON regardless of file extension. A `config.conf` that contains YAML is fine.
+
+### Precedence (who wins)
+
+1. **CLI flags** (e.g., `-d`, `-a`, `-v`)
+2. **Env var** `DDOSIM_CONFIG` (points to a file to load)
+3. **`config.yaml`** in the repo root
+4. Built-in defaults
+
+### Minimal example (`config.yaml`)
+
+```yaml
+# config.yaml
+num_devs: 4
+emulation_time_sec: 600
+network_type: csma      # csma | wifi
+churn_mode: "0"         # "0"=none, "1"=static, "2"=dynamic
+ns3_file_log_mode: "0"  # "0"=off, "1"=pcap only, "2"=pcap+stats
+
+dev_app: all            # all | ffmpeg | http | ftp
+
+images:
+  tserver: tserver
+  attacker: myattackbox
+  ids: ids
+  dev: mydnsmasqbox
+
+paths:
+  results_subdir: results
+  pids_dir: ./var/pid
+
+project_label: ddosim
+container_basename: emu
+destroy_scope: project   # project | run | all
+build_jobs: 7            # parallel build jobs for ns-3 (tune per host)
+```
+
+### Full option reference
+
+* `num_devs` *(int)*: Number of IoT Dev containers to create.
+* `emulation_time_sec` *(int)*: ns-3 simulation duration.
+* `network_type` *(str)*: `csma` or `wifi` (selects the scenario file).
+* `churn_mode` *(str)*: `"0"` = no churn, `"1"` = static churn, `"2"` = dynamic.
+* `ns3_file_log_mode` *(str)*: `"0"` = off, `"1"` = pcap only, `"2"` = pcap + stats.
+* `scenario_size_meters` *(str/int)*: Only for `wifi`; scene size in meters.
+* `build_jobs` *(int)*: Parallel jobs when building ns-3 (`./ns3 build -j N`).
+* `dev_app` *(str)*: Traffic generator used by Devs:
+
+  * `all`: each Dev randomly picks **one** app at first start and persists it
+  * `run_ffmpeg`: all Devs stream via RTMP to `10.0.0.1:1935`
+  * `run_curl_http`: all Devs fetch via HTTP from `10.0.0.1:80`
+  * `run_curl_ftp`: all Devs fetch via FTP from `10.0.0.1:21`
+* `images` *(map)*: Docker image tags for each role (`tserver`, `attacker`, `ids`, `dev`).
+* `paths.results_subdir` *(str)*: Directory under the repo where logs/results go.
+* `paths.pids_dir` *(str)*: PID files for container/process bookkeeping.
+* `project_label` *(str)*: Shared Docker label to group containers (used by `destroy`).
+* `container_basename` *(str)*: Prefix for container names (e.g., `emu1`, `emu2`, …).
+* `destroy_scope` *(str)*: `project` (default), `run`, or `all`.
+
+### Overriding via CLI
+
+Any config value that also has a CLI flag can be overridden per run. Common examples:
+
+```bash
+# Use config values except the ones you override here:
+./main.py -d 8 -a run_curl_http -v debug create
+./main.py -t 900 ns3
+./main.py --destroy-scope all destroy
+```
+
+### Verifying what loaded
+
+Run with `-v info` or `-v debug`. The header shows active settings (including “Dev App Policy” and the selected ns-3 version). If your custom file didn't load, ensure `DDOSIM_CONFIG` points to a readable path.
 
 ---
 
