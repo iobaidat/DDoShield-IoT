@@ -116,7 +116,7 @@ To Create a specific number of Devs (i.e., IoT Devices), use the following comma
 
 ```bash
 ./main.py -d <N> -v debug create
-# examples: create 2 device
+# examples: create 3 device
 ./main.py -d 3 -v debug create
 ```
 
@@ -141,7 +141,7 @@ By default, Devs choose **one** app at container start and **stick to it** for t
 ./main.py -d 3 -a http -v debug create
 
 # Force RTMP for all Devs
-./main.py -d 5 -a ffmpeg -v debug create
+./main.py -d 3 -a ffmpeg -v debug create
 ```
 
 **Notes**
@@ -284,9 +284,9 @@ docker exec -it emu3 bash
 docker exec -it emu2 bash
 telnet localhost
 # then run (below are three different attacks):
-udp 10.0.0.1 2 dport=19
-syn 10.0.0.1 2 dport=80
-ack 10.0.0.1 2 dport=22
+udp 10.0.0.1 2 dport=9
+syn 10.0.0.1 2 dport=9
+ack 10.0.0.1 2 dport=9
 ```
 
 ### Recreate with a different device count
@@ -302,6 +302,49 @@ ack 10.0.0.1 2 dport=22
 ```bash
 ./main.py -d 12 destroy
 ```
+
+---
+
+### Capturing PCAPs (Wireshark or tcpdump)
+You can capture traffic from any node in the testbed for analysis. Install tools on the **host**:
+```bash
+sudo apt-get install -y wireshark tcpdump
+```
+
+**Node naming cheat-sheet**
+- `emu1` = TServer (target)
+- `emu2` = Attacker (C&C)
+- `emu3` = IDS
+- `emu4` and above = IoT devices (e.g., with `-d 2`, devices are `emu4`, `emu5`)
+
+#### Option A — Wireshark (GUI)
+1) Open **Wireshark** on the host.
+2) Select the interface named **`si-emuN`** for the node you want to monitor  
+   (e.g., **`si-emu3`** to monitor all packets delivered to the IDS).
+3) Click **Start**. When done, **File → Save As…** to export a **.pcap**.
+
+#### Option B — tcpdump (CLI, host-side)
+Use this one-liner to capture on the **host interface** that corresponds to a container’s `eth0`.
+It writes a timestamped **.pcap** in the current directory.
+
+```bash
+# Example: capture for the IDS (emu3)
+cid=emu3; sudo tcpdump -i "$(ip -o link | awk -F': ' -v idx=$(docker exec "$cid" cat /sys/class/net/eth0/iflink) '$1==idx {split($2,a,\"@\"); print a[1]}')" \
+  -s0 -n -w "${cid}_$(date +%s).pcap"
+```
+
+- Similar to Wireshark, to capture the **Attacker** use `cid=emu2`, for the **TServer** use `cid=emu1`, etc.
+- Press **Ctrl+C** to stop. The PCAP is saved in your current directory.
+
+**Tips**
+- Limit duration or rotate files to avoid large captures:
+  ```bash
+  # 60-second chunks, keep 5 files max (rotating), full packets, no DNS lookups
+  cid=emu3; sudo tcpdump -i "$(ip -o link | awk -F': ' -v idx=$(docker exec "$cid" cat /sys/class/net/eth0/iflink) '$1==idx {split($2,a,\"@\"); print a[1]}')" \
+    -s0 -n -G 60 -W 5 -w "${cid}_%Y%m%d-%H%M%S.pcap"
+  ```
+- Verify a capture: open in Wireshark or run `capinfos <file.pcap`.
+- If your distro restricts GUI capture without root, add your user to the `wireshark` group and re-log, or run Wireshark/tcpdump with `sudo`.
 
 ---
 
@@ -374,9 +417,9 @@ build_jobs: 7            # parallel build jobs for ns-3 (tune per host)
 * `dev_app` *(str)*: Traffic generator used by Devs:
 
   * `all`: each Dev randomly picks **one** app at first start and persists it
-  * `run_ffmpeg`: all Devs stream via RTMP to `10.0.0.1:1935`
-  * `run_curl_http`: all Devs fetch via HTTP from `10.0.0.1:80`
-  * `run_curl_ftp`: all Devs fetch via FTP from `10.0.0.1:21`
+  * `ffmpeg`: all Devs stream via RTMP to `10.0.0.1:1935`
+  * `http`: all Devs fetch via HTTP from `10.0.0.1:80`
+  * `ftp`: all Devs fetch via FTP from `10.0.0.1:21`
 * `images` *(map)*: Docker image tags for each role (`tserver`, `attacker`, `ids`, `dev`).
 * `paths.results_subdir` *(str)*: Directory under the repo where logs/results go.
 * `paths.pids_dir` *(str)*: PID files for container/process bookkeeping.
@@ -390,7 +433,7 @@ Any config value that also has a CLI flag can be overridden per run. Common exam
 
 ```bash
 # Use config values except the ones you override here:
-./main.py -d 8 -a run_curl_http -v debug create
+./main.py -d 4 -a http -v debug create
 ./main.py -t 900 ns3
 ./main.py --destroy-scope all destroy
 ```
