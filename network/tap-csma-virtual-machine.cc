@@ -1,62 +1,54 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation;
+ * tap-csma-virtual-machine.cc
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Switched + small-bus CSMA topology for DDoSim:
+ *   node 0: TServer
+ *   node 1: Attacker
+ *   node 2: IDS
+ *   nodes 3..NumNodes-1: Devs
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * TServer, IDS, and the switch node (swCore) share a small CSMA bus.
+ * All other nodes have their own CSMA link to swCore, which is bridged
+ * with BridgeNetDevice to behave like an Ethernet switch.
+ *
+ * This gives:
+ *   - one TAP per node,
+ *   - no giant all-nodes-on-one-bus contention,
+ *   - IDS on the same bus as TServer, so it sees all traffic to TServer.
  */
-
 //
-// This is an illustration of how one could use virtualization techniques to
-// allow running applications on virtual machines talking over simulated
-// networks.
+//  Topology (ns-3 side)
 //
-// The actual steps required to configure the virtual machines can be rather
-// involved, so we don't go into that here.  Please have a look at one of
-// our HOWTOs on the nsnam wiki for more details about how to get the 
-// system confgured.  For an example, have a look at "HOWTO Use Linux 
-// Containers to set up virtual networks" which uses this code as an 
-// example.
+//                 Dev1          Dev2          Dev3        ...       Attacker
+//                  |             |             |                        |
+//                  |             |             |                        |
+//                  +-------------+-------------+------------------------+
+//                                |             |                        |
+//                              +----------------------------------------+
+//                              |                swCore                  |
+//                              |          (BridgeNetDevice)            |
+//                              +----------------------------------------+
+//                                               |
+//                                               |  (shared CSMA bus)
+//                                       +-------+-------+
+//                                       |               |
+//                                    TServer           IDS
 //
-// The configuration you are after is explained in great detail in the 
-// HOWTO, but looks like the following:
-//
-//  +----------+                              +----------+
-//  | virtual  |                              | virtual  |
-//  |  Linux   |                              |  Linux   |
-//  |   Host   |                              |   Host   |
-//  |          |                              |          |
-//  |   eth0   |                              |   eth0   |
-//  +----------+                              +----------+
-//       |                                         |
-//  +----------+                              +----------+
-//  |  Linux   |                              |  Linux   |
-//  |  Bridge  |                              |  Bridge  |
-//  +----------+                              +----------+
-//       |                                         |
-//  +------------+                          +-------------+
-//  | "tap-left" |                          | "tap-right" |
-//  +------------+                          +-------------+
-//       |           n0               n*           |
-//       |       +--------+       +--------+       |
-//       +-------|  tap   |       |  tap   |-------+
-//               | bridge |       | bridge |
-//               +--------+  ...  +--------+
-//               |  CSMA  |       |  CSMA  |
-//               +--------+       +--------+
-//                   |                |
-//                   |                |
-//                   |                |
-//                   ==================
-//                        CSMA LAN
+//  Notes:
+//    - TServer (node 0), IDS (node 2), and swCore share a single CSMA bus.
+//      * All traffic destined to TServer from Devs/Attacker passes over this bus.
+//      * IDS is on this bus, so in promiscuous mode it can see all traffic to TServer.
+//    - Attacker (node 1) and each Dev node (3..NumNodes-1) have their own
+//      dedicated CSMA link to swCore (no shared Dev bus).
+//    - swCore uses BridgeNetDevice to behave like an Ethernet switch, forwarding
+//      frames between the per-node links and the TServer/IDS bus.
+//    - Each node (TServer, Attacker, IDS, each Dev) has exactly one CsmaNetDevice
+//      and one TAP on the host side:
+//          node 0 -> 10.0.0.1  (TServer)  -> tap-<TapBaseName>1
+//          node 1 -> 10.0.0.2  (Attacker) -> tap-<TapBaseName>2
+//          node 2 -> 10.0.0.3  (IDS)      -> tap-<TapBaseName>3
+//          node i -> 10.0.0.(i+1) (Dev_i) -> tap-<TapBaseName>(i+1) for i>=3
 //
 
 #include <iostream>
@@ -72,10 +64,9 @@
 #include "ns3/core-module.h"
 #include "ns3/network-module.h"
 #include "ns3/csma-module.h"
+#include "ns3/bridge-module.h"
 #include "ns3/tap-bridge-module.h"
-
 #include "ns3/netanim-module.h"
-
 #include "ns3/internet-module.h"
 #include "ns3/ipv4-global-routing-helper.h"
 #include "ns3/applications-module.h"
@@ -84,250 +75,297 @@ using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE ("TapCsmaVirtualMachineExample");
 
-
+// ---------------------------------------------------------------------------
+//  Churn function
+// ---------------------------------------------------------------------------
 void
-Churn(std::vector<bool>& isChurn, NetDeviceContainer *devs, int churn_lev, int NoneDevsNodes)
+Churn (std::vector<bool>& isChurn,
+       NetDeviceContainer* devs,
+       int churn_lev,
+       int NoneDevsNodes)
 {
-  double q_h, e_h, l_h,L_h;
+  double q_h, e_h, l_h, L_h;
   double phi_1 = 0.16, phi_2 = 0.08, phi_3 = 0.04;
   double churn_threshold = 0.04;
-  Time dyna_churn_dur = Seconds(20); 
-  int NumNodes = (*devs).GetN();
+  Time dyna_churn_dur = Seconds (20);
+  int NumNodes = devs->GetN ();
 
-  for (int i = NoneDevsNodes; i < NumNodes; i++) // no churn for TServer, Attacker, and IDS
-  {
-    Ptr<UniformRandomVariable> x = CreateObject<UniformRandomVariable>();
-
-    RngSeedManager::SetSeed(time(NULL));  // Changes seed
-    RngSeedManager::SetRun(time(NULL));   // Changes run number
-
-    q_h = x->GetValue(0, 1);
-    e_h = x->GetValue(0, 1);
-
-    L_h = (1 - q_h) * (1 - e_h);
-
-    if (L_h <= 0.4)
-      l_h = phi_1 * L_h;
-    else if (L_h > 0.4 && L_h <= 0.7)
-      l_h = phi_2 * L_h;
-    else
-      l_h = phi_3 * L_h;
-
-    double value = (int)(l_h * 100 + .5);
-    double round_val =  (double)value / 100;
-
-    NS_LOG_UNCOND("Time:"<< Simulator::Now().ToDouble(ns3::Time::S)
-      <<" Node:"<<(i+1)<<" q(h):" << (q_h)<<" e(h):" << (e_h)
-      <<" L(h):" << (L_h)<<" l(h):" << (l_h)<<" p:"<<round_val<<"\n");
-
-    Ptr<CsmaNetDevice> curr_csma_netdev = DynamicCast<CsmaNetDevice>((*devs).Get(i));
-    if (round_val >= churn_threshold)
+  for (int i = NoneDevsNodes; i < NumNodes; ++i) // no churn for TServer/Attacker/IDS
     {
-      isChurn[i] = true;
-      curr_csma_netdev->SetAttribute("SendEnable",(BooleanValue(false)));
-      curr_csma_netdev->SetAttribute("ReceiveEnable",(BooleanValue(false)));
+      Ptr<UniformRandomVariable> x = CreateObject<UniformRandomVariable> ();
+
+      RngSeedManager::SetSeed (time (nullptr));  // Changes seed
+      RngSeedManager::SetRun (time (nullptr));   // Changes run number
+
+      q_h = x->GetValue (0.0, 1.0);
+      e_h = x->GetValue (0.0, 1.0);
+
+      L_h = (1 - q_h) * (1 - e_h);
+
+      if (L_h <= 0.4)
+        {
+          l_h = phi_1 * L_h;
+        }
+      else if (L_h > 0.4 && L_h <= 0.7)
+        {
+          l_h = phi_2 * L_h;
+        }
+      else
+        {
+          l_h = phi_3 * L_h;
+        }
+
+      double value = static_cast<int> (l_h * 100 + 0.5);
+      double round_val = value / 100.0;
+
+      NS_LOG_UNCOND ("Time:" << Simulator::Now ().ToDouble (Time::S)
+                             << " Node:" << (i + 1)
+                             << " q(h):" << q_h
+                             << " e(h):" << e_h
+                             << " L(h):" << L_h
+                             << " l(h):" << l_h
+                             << " p:" << round_val);
+
+      Ptr<CsmaNetDevice> curr_csma_netdev =
+        DynamicCast<CsmaNetDevice> (devs->Get (i));
+
+      if (round_val >= churn_threshold)
+        {
+          isChurn[i] = true;
+          curr_csma_netdev->SetAttribute ("SendEnable", BooleanValue (false));
+          curr_csma_netdev->SetAttribute ("ReceiveEnable", BooleanValue (false));
+        }
+      else if (isChurn[i])
+        {
+          isChurn[i] = false;
+          curr_csma_netdev->SetAttribute ("SendEnable", BooleanValue (true));
+          curr_csma_netdev->SetAttribute ("ReceiveEnable", BooleanValue (true));
+        }
     }
-    else if (isChurn[i])
-    {
-      isChurn[i] = false;
-      curr_csma_netdev->SetAttribute("SendEnable",(BooleanValue(true)));
-      curr_csma_netdev->SetAttribute("ReceiveEnable",(BooleanValue(true)));
-    }
-  }
 
   int churn_nodes = 0;
-  for(int i = 3; i < NumNodes; i++)
-  {
+  for (int i = NoneDevsNodes; i < NumNodes; ++i)
+    {
       if (isChurn[i])
-      {
-        churn_nodes++;
-      }
-  }
-  NS_LOG_UNCOND("churn nodes #:"<<churn_nodes<<"\n");
+        {
+          ++churn_nodes;
+        }
+    }
+  NS_LOG_UNCOND ("churn nodes #:" << churn_nodes);
 
   if (churn_lev == 2)
-    Simulator::Schedule (dyna_churn_dur, &Churn, isChurn, devs, churn_lev, NoneDevsNodes);
+    {
+      Simulator::Schedule (dyna_churn_dur, &Churn, isChurn, devs, churn_lev, NoneDevsNodes);
+    }
 }
 
-int 
-main (int argc, char *argv[])
+int
+main (int argc, char* argv[])
 {
   bool AnimationOn = false;
   int NumNodes = 10;
-  int NoneDevsNodes = 1;
+  int NoneDevsNodes = 3; // 0=TServer, 1=Attacker, 2=IDS
   double TotalTime = 600.0;
-  int churn = 0; // 0 => no churn, 1 => static, 2 => dynamic
-  int log = 0;   // 0 => disabled, 1 => log pcap, 2 => log all
+  int churn = 0;         // 0 => no churn, 1 => static, 2 => dynamic
+  int log = 0;           // 0 => disabled, 1 => pcap, 2 => more verbose
 
   std::string TapBaseName = "emu";
-
   std::string WriteDir = "";
 
-  LogComponentEnable ("TapCsmaVirtualMachineExample", LOG_LEVEL_ALL); // LOG_LEVEL_DEBUG // LOG_LEVEL_INFO
+  LogComponentEnable ("TapCsmaVirtualMachineExample", LOG_LEVEL_ALL);
 
   CommandLine cmd;
   cmd.AddValue ("NumNodes", "Number of nodes", NumNodes);
-  cmd.AddValue ("NoneDevsNodes", "Number of nodes other than Devs", NoneDevsNodes);
+  cmd.AddValue ("NoneDevsNodes", "Number of nodes other than Devs (must be 3: TServer, Attacker, IDS)", NoneDevsNodes);
   cmd.AddValue ("TotalTime", "Total simulation time", TotalTime);
   cmd.AddValue ("TapBaseName", "Base name for tap interfaces", TapBaseName);
   cmd.AddValue ("AnimationOn", "Enable animation", AnimationOn);
   cmd.AddValue ("Churn", "Churn level", churn);
   cmd.AddValue ("FileLog", "Enable log data to file", log);
-  cmd.AddValue ("WriteDirectory", "Enable log data to file", WriteDir);
-  
-  cmd.Parse (argc,argv);
+  cmd.AddValue ("WriteDirectory", "Output directory for logs/pcaps", WriteDir);
 
-  //
-  // We are interacting with the outside, real, world.  This means we have to 
-  // interact in real-time and therefore means we have to use the real-time
-  // simulator and take the time to calculate checksums.
-  //
-  GlobalValue::Bind ("SimulatorImplementationType", StringValue ("ns3::RealtimeSimulatorImpl"));
+  cmd.Parse (argc, argv);
+
+  if (NoneDevsNodes != 3)
+    {
+      NS_FATAL_ERROR ("This topology assumes NoneDevsNodes == 3 "
+                      "(0=TServer, 1=Attacker, 2=IDS).");
+    }
+  if (NumNodes < 4)
+    {
+      NS_FATAL_ERROR ("Need at least 4 nodes: TServer, Attacker, IDS, and >=1 Dev.");
+    }
+
+  // Realtime mode and checksums
+  GlobalValue::Bind ("SimulatorImplementationType",
+                     StringValue ("ns3::RealtimeSimulatorImpl"));
   GlobalValue::Bind ("ChecksumEnabled", BooleanValue (true));
 
-  NS_LOG_UNCOND ("Running simulation in csma mode");
+  NS_LOG_UNCOND ("Running simulation in switched + TServer/IDS bus CSMA mode");
 
-  //
-  // Create NumNodes ghost nodes.
-  //
-  NS_LOG_INFO("Creating nodes");
+  // ----------------------------------------------------------------------
+  //  Create ghost nodes: 0=TServer, 1=Attacker, 2=IDS, 3..=Devs
+  // ----------------------------------------------------------------------
+  NS_LOG_INFO ("Creating nodes");
   NodeContainer nodes;
   nodes.Create (NumNodes);
 
-  //
-  // Use a CsmaHelper to get a CSMA channel created, and the needed net 
-  // devices installed on both of the nodes.  The data rate and delay for the
-  // channel can be set through the command-line parser.  For example,
-  //
-  // ./waf --run "tap=csma-virtual-machine --ns3::CsmaChannel::DataRate=10000000"
-  //
+  // ----------------------------------------------------------------------
+  //  Create a switch node (swCore)
+  // ----------------------------------------------------------------------
+  NodeContainer swCoreNode;
+  swCoreNode.Create (1);
+  Ptr<Node> swCore = swCoreNode.Get (0);
 
   CsmaHelper csma;
-  csma.SetChannelAttribute ("DataRate", StringValue ("100GBps"));
+  // Use a very high rate so the internal simulated links are not the bottleneck.
+  csma.SetChannelAttribute ("DataRate", StringValue ("100Gbps"));
+  csma.SetChannelAttribute ("Delay", TimeValue (NanoSeconds (6560)));
 
-  NetDeviceContainer devices = csma.Install (nodes);
+  // For each node i, nodeDevs[i] will be its single CsmaNetDevice
+  std::vector<Ptr<NetDevice>> nodeDevs (NumNodes);
+  NetDeviceContainer swCorePorts;
 
+  // ---- Small bus: TServer (0), IDS (2), and swCore share one CSMA channel ----
+  NodeContainer busNodes;
+  busNodes.Add (nodes.Get (0)); // TServer
+  busNodes.Add (nodes.Get (2)); // IDS
+  busNodes.Add (swCore);
+  NetDeviceContainer busDevs = csma.Install (busNodes);
+  // Order: 0->TServer, 1->IDS, 2->swCore
+  nodeDevs[0] = busDevs.Get (0);
+  nodeDevs[2] = busDevs.Get (1);
+  swCorePorts.Add (busDevs.Get (2)); // swCore port on the bus
+
+  // ---- Attacker (1) gets its own link to swCore ----
+  {
+    NetDeviceContainer link = csma.Install (NodeContainer (nodes.Get (1), swCore));
+    nodeDevs[1] = link.Get (0);      // Attacker NIC
+    swCorePorts.Add (link.Get (1));  // swCore port
+  }
+
+  // ---- Devs [3..NumNodes-1] each get their own link to swCore ----
+  for (int i = 3; i < NumNodes; ++i)
+    {
+      NetDeviceContainer link = csma.Install (NodeContainer (nodes.Get (i), swCore));
+      nodeDevs[i] = link.Get (0);      // Dev NIC
+      swCorePorts.Add (link.Get (1));  // swCore port
+    }
+
+  // ---- swCore behaves like a switch, bridging all ports ----
+  BridgeHelper bridge;
+  bridge.Install (swCore, swCorePorts);
+
+  // Build a NetDeviceContainer in node index order for IP, churn, TAP
+  NetDeviceContainer devices;
+  for (int i = 0; i < NumNodes; ++i)
+    {
+      devices.Add (nodeDevs[i]);
+    }
+
+  // ----------------------------------------------------------------------
+  //  Internet stack & IP addressing
+  // ----------------------------------------------------------------------
   InternetStackHelper internetRight;
   internetRight.Install (nodes);
 
   Ipv4AddressHelper ipv4Right;
+  //   node 0 -> 10.0.0.1 (TServer)
+  //   node 1 -> 10.0.0.2 (Attacker)
+  //   node 2 -> 10.0.0.3 (IDS)
+  //   node i -> 10.0.0.(i+1) for i >= 3 (Devs)
   ipv4Right.SetBase ("10.0.0.0", "255.0.0.0");
   Ipv4InterfaceContainer interfacesRight = ipv4Right.Assign (devices);
+  (void) interfacesRight; // silence unused warning if not used further
 
-  //
-  // Use the TapBridgeHelper to connect to the pre-configured tap devices for 
-  // the left side.  We go with "UseBridge" mode since the CSMA devices support
-  // promiscuous mode and can therefore make it appear that the bridge is 
-  // extended into ns-3.  The install method essentially bridges the specified
-  // tap to the specified CSMA device.
-  //
-  NS_LOG_INFO("Creating tap bridges");
+  // ----------------------------------------------------------------------
+  //  TAP bridges: one TAP per node, matching node index + 1
+  // ----------------------------------------------------------------------
+  NS_LOG_INFO ("Creating tap bridges");
   TapBridgeHelper tapBridge;
   tapBridge.SetAttribute ("Mode", StringValue ("UseBridge"));
 
-  for (int i = 0; i < NumNodes; i++)
-  {
-    std::stringstream tapName;
-    tapName << "tap-" << TapBaseName << (i+1) ;
-    NS_LOG_INFO("Tap bridge = " + tapName.str ());
+  for (int i = 0; i < NumNodes; ++i)
+    {
+      std::stringstream tapName;
+      tapName << "tap-" << TapBaseName << (i + 1);
+      NS_LOG_INFO ("Tap bridge = " << tapName.str ());
 
-    tapBridge.SetAttribute ("DeviceName", StringValue (tapName.str ()));
-    tapBridge.Install (nodes.Get (i), devices.Get (i));  
-  }
+      tapBridge.SetAttribute ("DeviceName", StringValue (tapName.str ()));
+      tapBridge.Install (nodes.Get (i), devices.Get (i));
+    }
 
-  // churn
+  // ----------------------------------------------------------------------
+  //  Churn (only Devs: i >= NoneDevsNodes == 3)
+  // ----------------------------------------------------------------------
   if (churn != 0)
-  {
-    std::vector<bool> isChurn(NumNodes + 1);
-    for(int i = 0; i <= NumNodes; i++)
     {
-        isChurn[i] = false;
+      std::vector<bool> isChurn (NumNodes + 1, false);
+      Churn (isChurn, &devices, churn, NoneDevsNodes);
     }
 
-    Churn(isChurn, &devices, churn, NoneDevsNodes);
+  // ----------------------------------------------------------------------
+  //  Print TServer NIC info for debugging
+  // ----------------------------------------------------------------------
+  Ptr<NetDevice> PtrNetDevice;
+  {
+    Ptr<Node> PtrNode = nodes.Get (0);
+    PtrNetDevice = PtrNode->GetDevice (0);
+    Ptr<Ipv4> ipv4 = PtrNode->GetObject<Ipv4> ();
+    Ipv4InterfaceAddress iaddr = ipv4->GetAddress (1, 0);
+    Ipv4Address ipAddr = iaddr.GetLocal ();
+
+    std::cout << "\n****************************************"
+              << "\nTarget Server IPv4: " << ipAddr
+              << "\nTarget Server MAC: " << PtrNetDevice->GetAddress ()
+              << "\n****************************************\n\n";
   }
 
-  if (log) // no need to verify if we are not Logging
-  {
-    // We use stat from POSIX library, which is commonly available in Unix-like environments
-    // to see if we have Desktop dir to store output
-    struct stat buffer;
-    if (!stat(WriteDir.c_str(), &buffer) == 0)
+  // ----------------------------------------------------------------------
+  //  NetAnim (optional)
+  // ----------------------------------------------------------------------
+  if (AnimationOn)
     {
-      NS_FATAL_ERROR ("\"results\" folder does not exist");
+      NS_LOG_UNCOND ("Activating Animation");
+      AnimationInterface anim ("animation.xml");
+      for (uint32_t i = 0; i < nodes.GetN (); ++i)
+        {
+          std::stringstream ssi;
+          ssi << i;
+          anim.UpdateNodeDescription (nodes.Get (i), "Node" + ssi.str ());
+          anim.UpdateNodeColor (nodes.Get (i), 255, 0, 0);
+        }
+
+      anim.EnablePacketMetadata ();
+      anim.EnableWifiMacCounters (Seconds (0), Seconds (TotalTime));
+      anim.EnableWifiPhyCounters (Seconds (0), Seconds (TotalTime));
     }
-  }
 
-  /*
-  uint16_t port = 9;  // well-known echo port number
-
-  NS_LOG_INFO("Creating Taregt Server Application");
-  Ptr<TargetServer> tServer = CreateObject<TargetServer>();
-  nodes.Get (0)->AddApplication(tServer);
-  tServer->Setup(port, (NumNodes - 1), log, WriteDir);
-  tServer->SetStartTime(Seconds(0.));
-  tServer->SetStopTime(Seconds(TotalTime));
-
-  Ptr<NetDevice> PtrNetDevice;
-  {
-    Ptr <Node> PtrNode = nodes.Get (0);
-    PtrNetDevice = PtrNode->GetDevice(0);
-    Ptr<Ipv4> ipv4 = PtrNode->GetObject<Ipv4> ();
-    Ipv4InterfaceAddress iaddr = ipv4->GetAddress (1,0);
-    Ipv4Address ipAddr = iaddr.GetLocal ();
-
-    std::cout<<"\n****************************************"
-    <<"\nTarget Server IPv4: "<<ipAddr
-    <<"\nTarget Server MAC:"<<(PtrNetDevice->GetAddress())
-    <<"\n****************************************\n\n";
-  }
-  */
-
-  Ptr<NetDevice> PtrNetDevice;
-  {
-    Ptr <Node> PtrNode = nodes.Get (0);
-    PtrNetDevice = PtrNode->GetDevice(0);
-    Ptr<Ipv4> ipv4 = PtrNode->GetObject<Ipv4> ();
-    Ipv4InterfaceAddress iaddr = ipv4->GetAddress (1,0);
-    Ipv4Address ipAddr = iaddr.GetLocal ();
-
-    std::cout<<"\n****************************************"
-    <<"\nTarget Server IPv4: "<<ipAddr
-    <<"\nTarget Server MAC:"<<(PtrNetDevice->GetAddress())
-    <<"\n****************************************\n\n";
-  }
-
-  if( AnimationOn )
-  {
-    NS_LOG_UNCOND ("Activating Animation");
-    AnimationInterface anim ("animation.xml"); // Mandatory 
-    for (uint32_t i = 0; i < nodes.GetN (); ++i)
-      {
-        std::stringstream ssi;
-        ssi << i;
-        anim.UpdateNodeDescription (nodes.Get (i), "Node" + ssi.str()); // Optional
-        anim.UpdateNodeColor (nodes.Get (i), 255, 0, 0); // Optional
-      }
-
-    anim.EnablePacketMetadata (); // Optional
-    // anim.EnableIpv4RouteTracking ("routingtable-wireless.xml", Seconds (0), Seconds (5), Seconds (0.25)); //Optional
-    anim.EnableWifiMacCounters (Seconds (0), Seconds (TotalTime)); //Optional
-    anim.EnableWifiPhyCounters (Seconds (0), Seconds (TotalTime)); //Optional
-  }
-
-  //
-  // Run the simulation for TotalTime seconds to give the user time to play around
-  //
+  // ----------------------------------------------------------------------
+  //  Routing & pcap
+  // ----------------------------------------------------------------------
   Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
 
   if (log)
-  {
-    // dedicated pcap output location
-    std::string outputf = WriteDir + "/captured_packets_csma_"+std::to_string(NumNodes - NoneDevsNodes);
-    csma.EnablePcap(outputf, PtrNetDevice, true);
-  }
+    {
+      // Check output directory exists
+      struct stat buffer;
+      if (stat (WriteDir.c_str (), &buffer) != 0)
+        {
+          NS_FATAL_ERROR ("\"" << WriteDir << "\" folder does not exist");
+        }
 
+      std::string outputf =
+        WriteDir + "/captured_packets_csma_" + std::to_string (NumNodes - NoneDevsNodes);
+      csma.EnablePcap (outputf, PtrNetDevice, true);
+    }
+
+  // ----------------------------------------------------------------------
+  //  Run
+  // ----------------------------------------------------------------------
   Simulator::Stop (Seconds (TotalTime));
   Simulator::Run ();
   Simulator::Destroy ();
+
+  return 0;
 }

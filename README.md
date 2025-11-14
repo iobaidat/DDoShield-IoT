@@ -187,7 +187,7 @@ Start the online IDS with:
 ```
 
 * `--bundle` → path to the deployed model bundle
-* `--duration` → total run time (seconds)
+* `--duration` *(optional)* → total run time in seconds; **if omitted, the IDS runs continuously until you stop it (Ctrl+C)**.
 
 Once you start the IDS, you should see the IDS traffic classification output.
 
