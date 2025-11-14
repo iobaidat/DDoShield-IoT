@@ -329,8 +329,7 @@ It writes a timestamped **.pcap** in the current directory.
 
 ```bash
 # Example: capture for the IDS (emu3)
-cid=emu3; sudo tcpdump -i "$(ip -o link | awk -F': ' -v idx=$(docker exec "$cid" cat /sys/class/net/eth0/iflink) '$1==idx {split($2,a,\"@\"); print a[1]}')" \
-  -s0 -n -w "${cid}_$(date +%s).pcap"
+cid=emu3; sudo tcpdump -i "$(ip -o link | awk -F': ' -v idx=$(docker exec "$cid" cat /sys/class/net/eth0/iflink) '$1==idx {split($2,a,"@"); print a[1]}')" -s0 -w "${cid}_$(date +%s).pcap"
 ```
 
 - Similar to Wireshark, to capture the **Attacker** use `cid=emu2`, for the **TServer** use `cid=emu1`, etc.
@@ -340,8 +339,7 @@ cid=emu3; sudo tcpdump -i "$(ip -o link | awk -F': ' -v idx=$(docker exec "$cid"
 - Limit duration or rotate files to avoid large captures:
   ```bash
   # 60-second chunks, keep 5 files max (rotating), full packets, no DNS lookups
-  cid=emu3; sudo tcpdump -i "$(ip -o link | awk -F': ' -v idx=$(docker exec "$cid" cat /sys/class/net/eth0/iflink) '$1==idx {split($2,a,\"@\"); print a[1]}')" \
-    -s0 -n -G 60 -W 5 -w "${cid}_%Y%m%d-%H%M%S.pcap"
+  cid=emu3; sudo tcpdump -i "$(ip -o link | awk -F': ' -v idx=$(docker exec "$cid" cat /sys/class/net/eth0/iflink) '$1==idx {split($2,a,"@"); print a[1]}')" -s0 -n -G 60 -W 5 -w "${cid}_$(date +%s).pcap"
   ```
 - Verify a capture: open in Wireshark or run `capinfos <file.pcap`.
 - If your distro restricts GUI capture without root, add your user to the `wireshark` group and re-log, or run Wireshark/tcpdump with `sudo`.
