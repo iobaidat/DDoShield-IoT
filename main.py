@@ -460,11 +460,11 @@ def _parse_semver(ver: str) -> tuple[int, int, int]:
 def _ns3_home_from_version(repo_root: str, version: str) -> Path:
     """
     Compute NS3_HOME based on version and layout:
-    - For ns-3 < 3.35  : network/ns-allinone-X.YY/ns-X.YY
-    - For ns-3 >= 3.35 : network/ns-X.YY[.Z]
+    - For ns-3 < 3.45  : network/ns-allinone-X.YY/ns-X.YY
+    - For ns-3 >= 3.45 : network/ns-X.YY[.Z]
     """
     major, minor, _ = _parse_semver(version)
-    if major == 3 and minor < 35:
+    if major == 3 and minor < 45:
         return (
             Path(repo_root)
             / "network"
@@ -591,10 +591,10 @@ def build_images_and_ns3() -> None:
 
     For ns-3:
       - Layout is derived from NS3_VERSION + set_env_ns3_home():
-          * < 3.35  : network/ns-allinone-X.YY/ns-X.YY
-          * >= 3.35 : network/ns-X.YY[.Z]
-      - For < 3.35 we keep using legacy network/update.sh.
-      - For >= 3.35 we copy the scenario file directly to $NS3_HOME/scratch/tap-vm.cc.
+          * < 3.45  : network/ns-allinone-X.YY/ns-X.YY
+          * >= 3.45 : network/ns-X.YY[.Z]
+      - For < 3.45 we keep using legacy network/update.sh.
+      - For >= 3.45 we copy the scenario file directly to $NS3_HOME/scratch/tap-vm.cc
     """
     # -------- Docker images --------
     run(
@@ -652,44 +652,37 @@ def build_images_and_ns3() -> None:
         )
         sys.exit(2)
 
-    # Legacy layout (< 3.35): keep using update.sh (ns-allinone style)
-    if major == 3 and minor < 35:
-        LOGGER.debug(
-            "ns-3 version %s detected as < 3.35; using legacy update.sh.",
-            NS3_VERSION,
-        )
-        if CONFIG["network_type"] == "wifi":
-            run(
-                f"cd network && bash update.sh tap-wifi-virtual-machine.cc {NS3_VERSION}",
-                label="ns3_update_wifi",
-            )
-        else:
-            run(
-                f"cd network && bash update.sh tap-csma-virtual-machine.cc {NS3_VERSION}",
-                label="ns3_update_csma",
-            )
-    else:
-        # Modern layout (>= 3.35): copy directly into $NS3_HOME/scratch/tap-vm.cc
-        ns3_scratch = Path(NS3_HOME_ENV) / "scratch"
-        ns3_scratch.mkdir(parents=True, exist_ok=True)
+    ns3_home = Path(os.environ.get("NS3_HOME", ""))
 
-        dst = ns3_scratch / "tap-vm.cc"
-        try:
-            shutil.copyfile(scenario_src, dst)
-        except Exception as e:
-            LOGGER.error(
-                "Failed to copy scenario into ns-3 scratch:\n  %s -> %s\nError: %s",
-                scenario_src,
-                dst,
-                e,
-            )
-            sys.exit(2)
-
-        LOGGER.info(
-            "ns-3 scenario updated: %s -> %s (layout >= 3.35, no ns-allinone).",
-            scenario_src_name,
-            dst
+    if not ns3_home.exists():
+        LOGGER.error(
+            "NS3_HOME does not exist: %s\n"
+            "Run ./install.sh (optionally with --ns3-version) to set up ns-3.",
+            ns3_home,
         )
+        sys.exit(2)
+
+    dst_dir = ns3_home / "scratch"
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    dst = dst_dir / "tap-vm.cc"
+
+    # Copy scenario into scratch as tap-vm.cc
+    try:
+        shutil.copyfile(scenario_src, dst)
+    except Exception as e:
+        LOGGER.error(
+            "Failed to copy scenario into ns-3 scratch:\n  %s -> %s\nError: %s",
+            scenario_src,
+            dst,
+            e,
+        )
+        sys.exit(2)
+
+    LOGGER.info(
+        "ns-3 scenario installed: %s -> %s",
+        scenario_src_name,
+        dst
+    )
 
     LOGGER.info("ns-3 up to date (version %s; NS3_HOME=%s)", NS3_VERSION, NS3_HOME_ENV)
 

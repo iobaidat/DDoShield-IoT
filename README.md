@@ -71,16 +71,16 @@ Behavior:
     ```bash
     ./install.sh --ns3-version X.YY
     ```
-    (for example: `./install.sh --ns3-version 3.42`)
+    (for example: `./install.sh --ns3-version 3.43`)
   - The script validates that the corresponding tarball exists and only then updates
     `network/ns3_version`.
 
 Layout handling (automatic):
 
-- For **ns-3 < 3.35**:
+- For **ns-3 < 3.45**:
   - Uses `ns-allinone-X.YY` layout:
     `network/ns-allinone-X.YY/ns-X.YY`
-- For **ns-3 ≥ 3.35**:
+- For **ns-3 ≥ 3.45**:
   - Uses the core-only layout:
     `network/ns-X.YY/`
 
@@ -430,6 +430,37 @@ If you use DDoShield-IoT in your research, please cite:
   year={2024}
 }
 ```
+
+---
+
+## Known issue: Wi-Fi + TapBridge on newer ns-3 (CSMA unaffected)
+
+By default, DDoShield-IoT uses **CSMA**, which works fine on current ns-3 releases (no action needed).
+
+If you explicitly select **Wi-Fi** (`-n wifi`), be aware of an upstream regression affecting **TapBridge + Wi-Fi** on newer ns-3 (assert around `linkId.has_value()`); see the ns-3 issue tracker. ([about.gitlab.com][1])
+
+**Status**
+
+* ✅ **ns-3.37**: Wi-Fi + TapBridge works.
+* ⚠️ **ns-3 ≥ 3.39**: Wi-Fi + TapBridge may crash/assert. CSMA continues to work normally.
+
+**Workarounds**
+
+* Use the default **CSMA** (recommended):
+
+  ```bash
+  ./main.py -d 3 create       # CSMA is default
+  ```
+* If you need **Wi-Fi**, pin ns-3 to **3.37**:
+
+  ```bash
+  ./install.sh --ns3-version 3.37
+  ./main.py -n wifi -d 3 create
+  ```
+
+* Keep an eye on the upstream issue for a fix, then you can move back to the latest ns-3. ([about.gitlab.com][1])
+
+[1]: https://gitlab.com/nsnam/ns-3-dev/-/issues/1166?utm_source=chatgpt.com "Tap bridge and wifi assert with 'linkId.has_value()' for ns- ..."
 
 ---
 
