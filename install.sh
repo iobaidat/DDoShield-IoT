@@ -273,7 +273,7 @@ get_latest_ns3_version() {
 
 ns3_compute_layout() {
   local ver="$1"
-  if version_lt "$ver" "3.35"; then
+  if version_lt "$ver" "3.45"; then
     # Legacy: ns-allinone-V with ns-V inside
     NS3_TAR="ns-allinone-${ver}.tar.bz2"
     NS3_URL="https://www.nsnam.org/releases/${NS3_TAR}"
@@ -520,6 +520,7 @@ echo "${C_DIM}- Buildx:       ${DO_BUILDX:+installed}${C_RST}"
   echo "${C_DIM}- Docker IPv6:  enabled (daemon.json written; backup saved)${C_RST}"
 echo
 
+# Require reboot if Docker was installed and current user can't use it yet
 if [[ $DO_DOCKER -eq 1 ]]; then
   AUTO_REBOOT="${AUTO_REBOOT:-0}"
   TARGET_USER="${SUDO_USER:-$USER}"
