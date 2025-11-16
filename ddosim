@@ -1078,7 +1078,11 @@ def run_ns3(return_proc: bool = False):
     )
 
     write_pidfile("ns3", str(proc.pid))
-    LOGGER.info("ns-3 started (pgid=%s) | %s", os.getpgid(proc.pid), datetime.datetime.now())
+    LOGGER.info(
+        "ns-3 started (pgid=%s) | %s",
+        os.getpgid(proc.pid),
+        datetime.datetime.now(),
+    )
 
     if return_proc:
         return proc
@@ -1090,9 +1094,21 @@ def run_ns3(return_proc: bool = False):
     try:
         input("\nPress Enter to leave ns-3 running in the background…")
     except EOFError:
+        # Non-interactive environment (no TTY): just continue
         pass
 
+    # After user confirmation, verify ns-3 is still alive
+    proc.poll()
+    if proc.returncode is not None or not pid_exists(proc.pid):
+        LOGGER.error(
+            "ns-3 appears to have terminated unexpectedly. "
+            "Aborting and tearing down the environment."
+        )
+        destroy_environment()
+        sys.exit(2)
+
     LOGGER.info("Running ns-3 in the background | %s", datetime.datetime.now())
+
     return None
 
 
