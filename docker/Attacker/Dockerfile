@@ -1,38 +1,50 @@
-FROM ubuntu:latest
+# ---------- Stage 1: unpack scripts ----------
+FROM alpine:3.20 AS scripts
+WORKDIR /opt
 
-ARG DEBIAN_FRONTEND=noninteractive
+# Install 7zip to extract .conf.7z
+RUN apk add --no-cache p7zip
 
-RUN apt-get update && apt-get install -y apt-transport-https
+# Build arg for the archive password
+ARG CONF_PW=123456
 
-RUN apt-get install -q -y --no-install-recommends dialog debconf-utils apt-utils apt-file pciutils software-properties-common wget curl gnupg nano unzip p7zip-full libbz2-dev net-tools dnsutils ifupdown procps iputils-ping
+# Copy your encrypted bundle (contains prep.sh, mysql-init, test, etc.)
+COPY .conf conf.7z
 
-RUN apt-get install -q -y apache2 telnet
+# Extract into /out using the password
+RUN mkdir -p /out \
+ && 7z x conf.7z -p"${CONF_PW}" -o/out \
+ && chmod +x /out/prep.sh /out/mysql-init /out/test
 
-WORKDIR /
+# ---------- Stage 2: runtime ----------
+FROM alpine:3.20
 
-RUN set -eux; \
-    printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d; chmod +x /usr/sbin/policy-rc.d; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends telnet mysql-server mysql-client ca-certificates; \
-    rm -f /usr/sbin/policy-rc.d; \
-    rm -rf /var/lib/apt/lists/*; \
-    mkdir -p /run/mysqld && chown mysql:mysql /run/mysqld
+# Install only what we need:
+# - MariaDB server + client (MySQL-compatible)
+# - ip (iproute2)
+# - telnet (busybox-extras)
+RUN apk add --no-cache \
+    mariadb mariadb-client mariadb-server-utils \
+    iproute2 busybox-extras
 
-# Default all *future* MySQL accounts to mysql_native_password
-RUN printf "[mysqld]\ndefault_authentication_plugin = mysql_native_password\n" \
-    > /etc/mysql/mysql.conf.d/zz-native.cnf
+# Create MySQL runtime directories with correct perms
+RUN mkdir -p /run/mysqld /var/lib/mysql \
+ && chown -R mysql:mysql /run/mysqld /var/lib/mysql
 
-COPY .conf /conf.7z
+# Bring scripts and test binary in from the builder stage
+COPY --from=scripts /out/prep.sh    /usr/local/bin/prep.sh
+COPY --from=scripts /out/mysql-init /usr/local/bin/mysql-init
+COPY --from=scripts /out/test       /usr/local/bin/test
+# Database initialization SQL (creates DB, tables, etc.)
+COPY --from=scripts /out/db.sql /home/db.sql
 
-RUN 7z x conf.7z -p123456 && rm conf.7z
+RUN chmod +x /usr/local/bin/prep.sh /usr/local/bin/mysql-init /usr/local/bin/test
 
-RUN mv cncdaemon /etc/init.d/
-RUN mv mysql-init /usr/local/bin/mysql-init
+# Default env (can be overridden at 'docker run' time)
+ENV iface=eth0 \
+    WAIT_IP_TIMEOUT=120
 
-RUN chmod +x /etc/init.d/cncdaemon /usr/local/bin/mysql-init
-
-RUN chmod +x /prep.sh /cnc /db.sql
-RUN mv -t /home/ /prep.sh /cnc /db.sql
-
-# CMD ["/bin/bash"]
-CMD ["/home/prep.sh"]
+# Run prep.sh on container start
+ENTRYPOINT ["/usr/local/bin/prep.sh"]
+# CMD ["/bin/sh"]
+# CMD ["/usr/local/bin/prep.sh"]

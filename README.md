@@ -213,15 +213,28 @@ Once you start the IDS, you should see the IDS traffic classification output.
 Open **another terminal** (third terminal) and attach to the Attacker container (named `emu2`):
 
 ```bash
-docker exec -it emu2 bash
+docker exec -it emu2 sh
 ```
 
 Then open the C&C console:
+
 ```bash
 telnet localhost
-# Credentials:
-#   user: root
-#   pass: root
+```
+
+When you see:
+
+```text
+Connected to localhost
+```
+
+**press Enter once** to get the login prompt. If you just wait without pressing Enter, telnet will eventually show `Connection closed by foreign host`.
+
+Credentials:
+
+```text
+user: root
+pass: root
 ```
 
 To launch an attack, make sure that Devs are connected to the C&C Server.
@@ -293,10 +306,15 @@ docker exec -it emu3 bash
 ### Three short attacks back-to-back
 
 ```bash
-# Open a third terminal, run:
-docker exec -it emu2 bash
+# Open a third terminal and attach to the Attacker (emu2):
+docker exec -it emu2 sh
+
+# From inside the container, start the C&C console:
 telnet localhost
-# then run (below are three different attacks):
+# When you see "Connected to localhost", press Enter once
+# to get the login prompt (user: root, pass: root).
+
+# Then run (three different short attacks):
 udp 10.0.0.1 2 dport=9
 syn 10.0.0.1 2 dport=9
 ack 10.0.0.1 2 dport=9
