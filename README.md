@@ -530,6 +530,7 @@ If you explicitly select **Wi-Fi** (`-n wifi`), be aware of an upstream regressi
 * Keep an eye on the upstream issue for a fix, then you can move back to the latest ns-3. ([about.gitlab.com][1])
 
 [1]: https://gitlab.com/nsnam/ns-3-dev/-/issues/1166?utm_source=chatgpt.com "Tap bridge and wifi assert with 'linkId.has_value()' for ns- ..."
+
 ---
 
 ## Contributing
