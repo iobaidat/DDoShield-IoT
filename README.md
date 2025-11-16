@@ -12,8 +12,22 @@ DDoShield-IoT is an open-source testbed to **simulate IoT botnet DDoS traffic**,
 ## Requirements
 - OS: **Ubuntu 22.04/24.04** or **Debian 12**
 - Hardware: ≥ **4 CPU cores**, **8 GB RAM** (16 GB+ recommended), **25 GB** free disk
+- Python: **3.8 or newer** (tested with **3.8–3.12**)
 - Internet access during install
 - Sudo privileges (installer will prompt where needed)
+
+### Sudo and privileges
+
+Both `install.sh` and `ddosim` may ask for your sudo password to:
+
+- install packages
+- load kernel modules (`modprobe`)
+- configure tap/bridge interfaces
+
+This is expected. If you’re on a shared system, make sure you’re allowed to use `sudo` before running the installer.
+
+> **Note:** DDoShield-IoT is designed for Linux hosts (Ubuntu/Debian).  
+> It relies on `ip netns`, tap interfaces, and kernel modules that are not available on Windows or macOS without heavy virtualization.
 
 ---
 
@@ -33,11 +47,11 @@ sudo chmod +x -R DDoShield-IoT/
 # 4) Navigate to the downloaded repository.
 cd ~/DDoShield-IoT
 
-# 4) Install dependencies (show progress). Do NOT prefix with sudo.
+# 5) Install dependencies (show progress). Do NOT prefix with sudo.
 ./install.sh -v
-````
+```
 
-> **Important:** After `./install.sh` completes, **reboot the machine** before running `main.py`. Docker non‑root access is not active until after a reboot.
+> **Important:** After `./install.sh` completes, **reboot the machine** before running `ddosim`. Docker non‑root access is not active until after a reboot.
 
 ### Notable installer options
 - `--ns3-only` / `--docker-only` – install only one side
@@ -57,7 +71,7 @@ Examples:
 ### How ns-3 version is selected
 
 The `install.sh` script manages the ns-3 version for you and records it in `network/ns3_version`.
-`main.py` then reads this file to know which ns-3 tree to use.
+`ddosim` then reads this file to know which ns-3 tree to use.
 
 Behavior:
 
@@ -86,7 +100,7 @@ Layout handling (automatic):
 
 At runtime:
 
-- `main.py` checks:
+- `ddosim` checks:
   - that `network/ns3_version` exists,
   - that the matching ns-3 directory exists,
   - and that the `ns3` launcher is present.
@@ -108,16 +122,24 @@ cd ~/DDoShield-IoT
 ### 2) CLI help
 
 ```bash
-./main.py --help
+ddosim --help
 ```
+
+#### Verbosity hints
+
+- `-v quiet`  (default) – minimal console noise, good once everything works.
+- `-v info`   – light progress messages.
+- `-v verbose` – includes child process output (Docker / ns-3).
+- `-v debug`  – maximum detail; recommended for the **first** `create` on a new machine.
+
 
 ### 3) Create nodes
 To Create a specific number of Devs (i.e., IoT Devices), use the following command:
 
 ```bash
-./main.py -d <N> -v debug create
-# examples: create 3 device
-./main.py -d 3 -v debug create
+ddosim -d <N> -v debug create
+# examples: create 3 devices
+ddosim -d 3 -v debug create
 ```
 
 #### Choose Dev traffic app (`-a`)
@@ -135,39 +157,42 @@ By default, Devs choose **one** app at container start and **stick to it** for t
 
 ```bash
 # Random per-Dev (default)
-./main.py -d 3 -v debug create
+ddosim -d 3 -v debug create
 
 # Force HTTP for all Devs
-./main.py -d 3 -a http -v debug create
+ddosim -d 3 -a http -v debug create
 
 # Force RTMP for all Devs
-./main.py -d 3 -a ffmpeg -v debug create
+ddosim -d 3 -a ffmpeg -v debug create
 ```
 
 **Notes**
 
-* Dev containers mount a dataset at `/docker/videos` (configured by `main.py`); make sure your media files (e.g., `.mp4`) are available there so Devs have content to send.
-* The per-Dev app choice persists for the container lifetime. To reshuffle: run `destroy` and `create` again (or remove `/var/run/selected_app` inside a Dev).
+* On the **host**, put your media files (e.g., `.mp4`) under `docker/videos/` in the repo.
+* Dev containers see this directory mounted read-only at `/data` inside the container.
+* The per-Dev app choice persists for the container lifetime. To reshuffle: run `destroy`
+  and `create` again (or remove `/var/run/selected_app` inside a Dev).
+
 
 > **Note — First Run Takes Longer**
-> The very first `./main.py -d <N> create` (optionally with `-v debug`) can take a while
+> The very first `ddosim -d <N> create` (optionally with `-v debug`) can take a while
 > because Docker builds all node images (Attacker, Devs, TServer, IDS) and pulls base
 > layers. Subsequent runs are **much faster** thanks to Docker layer caching.
 >
 > Tips:
-> - Use `-v debug` once to see build progress (e.g., `./main.py -d 2 -v debug create`).
+> - Use `-v debug` once to see build progress (e.g., `ddosim -d 2 -v debug create`).
 >   After the first run you can omit `-v debug` (default output is concise).
 > - Check disk usage with `docker system df`.
 > - To reclaim space later: `docker system prune -a` (removes **unused** images, **stopped**
 >   containers, unused networks, and build cache). After pruning, the next
->   `./main.py -d <N> create` will rebuild images again from scratch and take longer.
+>   `ddosim -d <N> create` will rebuild images again from scratch and take longer.
 
 ### 4) Start the ns-3 network
 
 ```bash
-./main.py -d <N> -v debug ns3
+ddosim -d <N> -v debug ns3
 # examples:
-./main.py -d 3 -v debug ns3
+ddosim -d 3 -v debug ns3
 ```
 
 This creates bridges/taps, attaches containers, configures the simulator, and starts emulation. The target server (TServer) is reachable at **10.0.0.1** by default.
@@ -250,15 +275,15 @@ General form:
 
 * You can queue multiple attacks back-to-back by entering several lines in the C&C console.
 * To exit the C&C: type `quit` or `exit`.
-* If no bots show up in `botcount`, make sure the Dev containers were created and attached to the ns-3 network (`./main.py -d <N> create` then `./main.py -d <N> ns3`).
+* If no bots show up in `botcount`, make sure the Dev containers were created and attached to the ns-3 network (`ddosim -d <N> create` then `ddosim -d <N> ns3`).
 
 
 ### 7) Destroy nodes (cleanup)
 
 ```bash
-./main.py -d <N> -v debug destroy
+ddosim -d <N> -v debug destroy
 # example:
-./main.py -d 3 -v debug destroy
+ddosim -d 3 -v debug destroy
 ```
 
 ---
@@ -269,12 +294,12 @@ General form:
 
 ```bash
 # In the first terminal, run:
-./main.py -d 5 create
-./main.py -d 5 ns3
+ddosim -d 5 create
+ddosim -d 5 ns3
 
 # Open a second terminal, run:
 docker exec -it emu3 bash
-./home/ids-online-predict.py --bundle /home/ids-model-bundle --duration 180
+/home/ids-online-predict.py --bundle /home/ids-model-bundle --duration 180
 ```
 
 ### Three short attacks back-to-back
@@ -292,15 +317,15 @@ ack 10.0.0.1 2 dport=9
 ### Recreate with a different device count
 
 ```bash
-./main.py -d 5 destroy
-./main.py -d 12 create
-./main.py -d 12 ns3
+ddosim -d 5 destroy
+ddosim -d 12 create
+ddosim -d 12 ns3
 ```
 
 ### Destroy and reclaim resources
 
 ```bash
-./main.py -d 12 destroy
+ddosim -d 12 destroy
 ```
 
 ---
@@ -348,22 +373,22 @@ cid=emu3; sudo tcpdump -i "$(ip -o link | awk -F': ' -v idx=$(docker exec "$cid"
 
 ## Configuration (`config.yaml` / `config.conf` / `DDOSIM_CONFIG`)
 
-You can customize defaults (number of Devs, image names, logging, etc.) with a config file. By default, `main.py` looks for **`config.yaml`** in the repository root. You can also point to **any** file (YAML or JSON) using the `DDOSIM_CONFIG` environment variable.
+You can customize defaults (number of Devs, image names, logging, etc.) with a config file. By default, `ddosim` looks for **`config.yaml`** in the repository root. You can also point to **any** file (YAML or JSON) using the `DDOSIM_CONFIG` environment variable.
 
 ### Where to put it
 
 * **Default**: `./config.yaml` (project root)
-* **Custom location / filename**: set `DDOSIM_CONFIG=/path/to/your-config.conf` before running `main.py`.
+* **Custom location / filename**: set `DDOSIM_CONFIG=/path/to/your-config.conf` before running `ddosim`.
 
 Examples:
 
 ```bash
 # One-off run with a custom config path (YAML or JSON content)
-DDOSIM_CONFIG=/path/to/config.conf ./main.py -v info create
+DDOSIM_CONFIG=/path/to/config.conf ddosim -v info create
 
 # Make it permanent in your shell session
 export DDOSIM_CONFIG=$PWD/my-config.yaml
-./main.py ns3
+ddosim ns3
 ```
 
 > Note: The loader accepts YAML **or** JSON regardless of file extension. A `config.conf` that contains YAML is fine.
@@ -431,9 +456,9 @@ Any config value that also has a CLI flag can be overridden per run. Common exam
 
 ```bash
 # Use config values except the ones you override here:
-./main.py -d 4 -a http -v debug create
-./main.py -t 900 ns3
-./main.py --destroy-scope all destroy
+ddosim -d 4 -a http -v debug create
+ddosim -t 900 ns3
+ddosim --destroy-scope all destroy
 ```
 
 ### Verifying what loaded
@@ -444,15 +469,22 @@ Run with `-v info` or `-v debug`. The header shows active settings (including �
 
 ## Tips & Troubleshooting
 
+* **"ddosim requires Python 3.8 or newer"** → Your system's `python3` is too old.
+  Install Python 3.8+ (e.g., Ubuntu 20.04+ / Debian 11+) or use a newer Python from
+  `pyenv` / `conda`.
+
 * **“permission denied” on docker** → Reboot after install so your user is in the `docker` group.
 * **First `create` is slow** → Images are being built and cached; later runs are faster.
-* **“Error creating container side bridges”** → Re-run `./main.py -d <N> ns3` after `create`; ensure interfaces exist before continuing.
-* **No IDS output** → Ensure traffic is flowing (make sure ns3 is running: `./main.py -d <N> ns3`) and that IDS is running with the command above.
+* **“Error creating container side bridges”** → Re-run `ddosim -d <N> ns3` after `create`; ensure interfaces exist before continuing.
+* **No IDS output** → Ensure traffic is flowing (make sure ns3 is running: `ddosim -d <N> ns3`) and that IDS is running with the command above.
 * **Logs / artifacts**
 
-  * Run logs: `results/logs/<run_id>/`
-  * ns-3 sources/build: `network/ns-allinone-<ver>/ns-<ver>/`
-  * Reclaim disk: `docker system prune -a` (careful: removes unused images, stopped containers, unused networks, and build cache).
+  * Run logs: `results/logs/<run_id>/`  
+    From your home directory this is typically `~/DDoShield-IoT/results/logs/<run_id>/`.  
+    `ddosim` prints the exact run log path each time you invoke it.
+  * Reclaim disk: `docker system prune -a` (careful: removes unused images, stopped
+    containers, unused networks, and build cache).
+
 
 ---
 
@@ -485,24 +517,28 @@ If you explicitly select **Wi-Fi** (`-n wifi`), be aware of an upstream regressi
 * ✅ **ns-3.37**: Wi-Fi + TapBridge works.
 * ⚠️ **ns-3 ≥ 3.39**: Wi-Fi + TapBridge may crash/assert. CSMA continues to work normally.
 
+> **Host OS note for ns-3.37:**  
+> ns-3.37 depends on older system libraries. On newer Ubuntu releases (e.g., 24.04) it may fail to configure or build cleanly.  
+> If you specifically need Wi-Fi with ns-3.37, we recommend running DDoShield-IoT on **Ubuntu 20.04** (or a VM/container based on it), where those older libraries are still available.
+
 **Workarounds**
 
 * Use the default **CSMA** (recommended):
 
   ```bash
-  ./main.py -d 3 create       # CSMA is default
-  ```
+  ddosim -d 3 create       # CSMA is default
+````
+
 * If you need **Wi-Fi**, pin ns-3 to **3.37**:
 
   ```bash
   ./install.sh --ns3-version 3.37
-  ./main.py -n wifi -d 3 create
+  ddosim -n wifi -d 3 create
   ```
 
 * Keep an eye on the upstream issue for a fix, then you can move back to the latest ns-3. ([about.gitlab.com][1])
 
 [1]: https://gitlab.com/nsnam/ns-3-dev/-/issues/1166?utm_source=chatgpt.com "Tap bridge and wifi assert with 'linkId.has_value()' for ns- ..."
-
 ---
 
 ## Contributing
@@ -512,7 +548,7 @@ PRs and issues are welcome!
 **Code layout**
 
 * `install.sh` — install dependencies (Docker, ns-3, etc.)
-* `main.py` — orchestrates containers and ns-3 runs
+* `ddosim` — orchestrates containers and ns-3 runs
 * `docker/` — Dockerfiles and assets for Attacker/IDS/TServer/Devs
 * `connections/` — scripts that connect Docker ↔ ns-3
 * `network/` — ns-3 sources and config

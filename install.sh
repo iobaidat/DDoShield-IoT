@@ -175,6 +175,12 @@ quiet_remove_pkg() {
 command -v apt-get >/dev/null || fail "Debian/Ubuntu required (apt-get not found)."
 command -v sudo >/dev/null || fail "sudo is required."
 
+# Defaults for Docker group tracking
+TARGET_USER="${SUDO_USER:-$USER}"
+ADDED_DOCKER_GROUP=0
+WAS_IN_DOCKER_PRE=0
+EFFECTIVE_HAS_DOCKER=0
+
 # --------------------------- Base packages ---------------------------
 info "Updating package index & installing base tools..."
 apt_update_retry
@@ -405,7 +411,7 @@ ns3_configure_build() {
 # --------------------------- ns-3 (install or configure-only) -------
 if [[ $DO_NS3 -eq 1 ]]; then
   info "Installing ns-3 toolchain & dependencies..."
-  apt_install ccache gdb valgrind clang-format clang-tidy uncrustify cmake-format
+  apt_install ccache gdb valgrind clang-format clang-tidy uncrustify
   apt_install qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools
   apt_install openmpi-bin openmpi-common openmpi-doc libopenmpi-dev
   apt_install mercurial doxygen graphviz imagemagick
@@ -451,9 +457,50 @@ if [[ $DO_DOCKER -eq 1 ]]; then
   info "Verifying Docker with hello-world (sudo run)..."
   run "sudo docker run --rm hello-world" "Docker hello-world"
 
-  as_root "groupadd -f docker"
+  # Add current user to docker group
   TARGET_USER="${SUDO_USER:-$USER}"
-  as_root "usermod -aG docker $TARGET_USER"
+  if [[ $EUID -eq 0 && -z "${SUDO_USER:-}" ]]; then
+    TARGET_USER="$(getent passwd 1000 | cut -d: -f1 || true)"
+    if [[ -z "$TARGET_USER" ]]; then
+      TARGET_USER="$(logname 2>/dev/null || echo root)"
+    fi
+  fi
+
+  # Ensure the docker group exists (idempotent)
+  as_root "groupadd -f docker" || true
+
+  ADDED_DOCKER_GROUP=0
+  WAS_IN_DOCKER_PRE=0
+
+  # Snapshot pre-state membership from /etc/group
+  if id -nG "$TARGET_USER" | grep -qw docker 2>/dev/null; then
+    WAS_IN_DOCKER_PRE=1
+  else
+    if as_root "usermod -aG docker $TARGET_USER"; then
+      ADDED_DOCKER_GROUP=1
+    fi
+  fi
+
+  # Does THIS shell/session already have the docker group effective?
+  EFFECTIVE_HAS_DOCKER=0
+  docker_gid="$(getent group docker | cut -d: -f3 || true)"
+  if [[ -n "$docker_gid" ]]; then
+    if [[ $EUID -ne 0 && -z "${SUDO_USER:-}" ]]; then
+      # Running as the target user directly; check this process's group vector.
+      if awk '/^Groups:/{for(i=2;i<=NF;i++) if ($i=='"$docker_gid"') f=1} END{exit !f}' /proc/$$/status; then
+        EFFECTIVE_HAS_DOCKER=1
+      fi
+    else
+      # Running under sudo/root. If we DID NOT just add the group,
+      # check a fresh login shell for the target user to avoid over-prompting on re-runs.
+      if [[ $ADDED_DOCKER_GROUP -eq 0 ]]; then
+        if sudo -iu "$TARGET_USER" bash -lc "id -nG | grep -qw docker"; then
+          EFFECTIVE_HAS_DOCKER=1
+        fi
+      fi
+    fi
+  fi
+
 
   if [[ $WRITE_DOCKER_IPV6 -eq 1 ]]; then
     info "Writing /etc/docker/daemon.json (IPv6 enabled; backup preserved)..."
@@ -472,7 +519,7 @@ JSON'
 fi
 
 # --------------------------- Buildx ---------------------------------
-if [[ $DO_DOCKER -eq 1 && $DO_BUILDX == 1 ]]; then
+if [[ $DO_DOCKER -eq 1 && $DO_BUILDX -eq 1 ]]; then
   info "Installing Buildx prerequisites (qemu/binfmt)..."
   apt_update_retry
   apt_install qemu-user-static
@@ -499,6 +546,24 @@ if [[ $DO_DOCKER -eq 1 && $DO_BUILDX == 1 ]]; then
   fi
 fi
 
+# --------------------------- ddosim CLI symlink ---------------------------
+if [[ $DO_DOCKER -eq 1 ]]; then
+  CLI_NAME="ddosim"
+  CLI_SRC="${SCRIPT_DIR}/${CLI_NAME}"
+  CLI_DEST="/usr/local/bin/${CLI_NAME}"
+
+  if [[ -x "${CLI_SRC}" ]]; then
+    info "Installing/updating ${CLI_NAME} symlink at ${CLI_DEST}..."
+    if [[ -e "${CLI_DEST}" && ! -L "${CLI_DEST}" ]]; then
+      warn "${CLI_DEST} exists and is not a symlink; skipping ddosim symlink."
+      warn "If this is an old install, remove or rename it manually."
+    else
+      as_root "ln -sf '${CLI_SRC}' '${CLI_DEST}'"
+    fi
+  else
+    warn "Executable ${CLI_SRC} not found; skipping ddosim CLI symlink."
+  fi
+fi
 # --------------------------- Summary --------------------------------
 echo
 info "Installation finished."
@@ -521,18 +586,18 @@ echo "${C_DIM}- Buildx:       ${DO_BUILDX:+installed}${C_RST}"
 echo
 
 # Require reboot if Docker was installed and current user can't use it yet
-if [[ $DO_DOCKER -eq 1 ]]; then
-  AUTO_REBOOT="${AUTO_REBOOT:-0}"
-  TARGET_USER="${SUDO_USER:-$USER}"
-  if ! sudo -iu "$TARGET_USER" bash -lc 'docker version >/dev/null 2>&1'; then
-    echo
-    echo "${C_RED}[ACTION REQUIRED]${C_RST} Docker non-root access for '${TARGET_USER}' is not active."
-    echo "  ${C_GREEN}Reboot now${C_RST} to finish setup."
-    echo
-    if [[ "$AUTO_REBOOT" == "1" ]]; then
-      info "Auto-reboot enabled — rebooting now..."
-      as_root "reboot"
-    fi
-    exit 0
+if [[ $DO_DOCKER -eq 1 && "$TARGET_USER" != "root" && ( $ADDED_DOCKER_GROUP -eq 1 || ( $WAS_IN_DOCKER_PRE -eq 1 && $EFFECTIVE_HAS_DOCKER -eq 0 ) ) ]]; then
+  echo
+  echo "${C_RED}[ACTION REQUIRED]${C_RST} Docker non-root access for '${TARGET_USER}' will be active after you re-login."
+  echo "  ${C_GREEN}Log out and back in${C_RST}"
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+    echo "  WSL detected: run ${C_YEL}wsl.exe --shutdown${C_RST} then reopen your terminal."
+  else
+    echo "  On headless servers, a ${C_GREEN}reboot${C_RST} is simplest."
+  fi
+  echo
+  if [[ "${AUTO_REBOOT:-0}" == "1" ]]; then
+    info "Auto-reboot enabled — rebooting now..."
+    as_root "reboot"
   fi
 fi
