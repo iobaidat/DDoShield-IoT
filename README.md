@@ -190,7 +190,7 @@ This creates bridges/taps, attaches containers, configures the simulator, and st
 Open a **new terminal** (second terminal) and attach to the IDS container (named `emu3`):
 
 ```bash
-docker exec -it emu3 bash
+docker exec -it emu3 sh
 ```
 
 Start the online IDS with:
@@ -299,7 +299,7 @@ ddosim -d 5 create
 ddosim -d 5 ns3
 
 # Open a second terminal, run:
-docker exec -it emu3 bash
+docker exec -it emu3 sh
 /home/ids-online-predict.py --bundle /home/ids-model-bundle --duration 180
 ```
 
