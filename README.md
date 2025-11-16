@@ -32,7 +32,8 @@ This is expected. If you’re on a shared system, make sure you’re allowed to 
 ---
 
 ## Download & Install
-The following downloads DDoShield-IoT and sets up Docker, Docker Buildx, and ns‑3 (version pinned in `network/ns3_version`).
+The following downloads DDoShield-IoT and sets up Docker, Docker Buildx, and ns-3
+(using an automatically selected stable ns-3 release, unless you explicitly choose one).
 
 ```bash
 # 1) Install git.
@@ -56,7 +57,7 @@ cd ~/DDoShield-IoT
 ### Notable installer options
 - `--ns3-only` / `--docker-only` – install only one side
 - `--ns3-profile {optimized|debug}` – choose ns‑3 build profile (default: `optimized`)
-- `--ns3-configure-only` – ensure the exact version in `network/ns3_version` is present, then (optionally) clean, reconfigure, and rebuild
+- `--ns3-configure-only` – ensure the currently selected ns-3 version is present, then (optionally) clean, reconfigure, and rebuild
 - `--ns3-clean {auto|none|clean|distclean}` – cleaning strategy before configure (default: `auto`)
 
 Examples:
@@ -70,41 +71,28 @@ Examples:
 
 ### How ns-3 version is selected
 
-The `install.sh` script manages the ns-3 version for you and records it in `network/ns3_version`.
-`ddosim` then reads this file to know which ns-3 tree to use.
+The `install.sh` script manages the ns-3 version for you.
 
 Behavior:
 
 - **If you do nothing**:
-  - `./install.sh` automatically detects the latest stable ns-3 release from the official
-    ns-3 repositories and installs it.
-  - The selected version is written to:
-    `network/ns3_version`
+  - `./install.sh` automatically detects a recent stable ns-3 release from the
+    official ns-3 repositories and installs it.
+  - Future ns-3 operations (configure/build) reuse that same version.
+
 - **If you want a specific version**:
   - Run:
     ```bash
     ./install.sh --ns3-version X.YY
     ```
     (for example: `./install.sh --ns3-version 3.43`)
-  - The script validates that the corresponding tarball exists and only then updates
-    `network/ns3_version`.
-
-Layout handling (automatic):
-
-- For **ns-3 < 3.45**:
-  - Uses `ns-allinone-X.YY` layout:
-    `network/ns-allinone-X.YY/ns-X.YY`
-- For **ns-3 ≥ 3.45**:
-  - Uses the core-only layout:
-    `network/ns-X.YY/`
+  - The script validates that the corresponding tarball exists and then installs
+    that ns-3 release.
 
 At runtime:
 
-- `ddosim` checks:
-  - that `network/ns3_version` exists,
-  - that the matching ns-3 directory exists,
-  - and that the `ns3` launcher is present.
-- If anything is missing or inconsistent, it will instruct you to re-run:
+- `ddosim` uses whichever ns-3 version `install.sh` has set up.
+- If something is missing or inconsistent, it will instruct you to re-run:
   ```bash
   ./install.sh [--ns3-version X.YY]
   ```
@@ -134,7 +122,7 @@ ddosim --help
 
 
 ### 3) Create nodes
-To Create a specific number of Devs (i.e., IoT Devices), use the following command:
+To create a specific number of Devs (i.e., IoT devices), use the following command:
 
 ```bash
 ddosim -d <N> -v debug create
@@ -268,8 +256,8 @@ General form:
 **See available attacks**
 
 * Type `?` in the C&C console to list all supported attack commands.
+* See [attack-instructions](attack-instructions.md) for all supported attack commands and their options.
 
-* Check [attack-instructions](attack-instructions.md) to list all supported attack commands and their options
 
 **Tips**
 
@@ -472,16 +460,19 @@ Run with `-v info` or `-v debug`. The header shows active settings (including �
 * **"ddosim requires Python 3.8 or newer"** → Your system's `python3` is too old.
   Install Python 3.8+ (e.g., Ubuntu 20.04+ / Debian 11+) or use a newer Python from
   `pyenv` / `conda`.
-
 * **“permission denied” on docker** → Reboot after install so your user is in the `docker` group.
 * **First `create` is slow** → Images are being built and cached; later runs are faster.
 * **“Error creating container side bridges”** → Re-run `ddosim -d <N> ns3` after `create`; ensure interfaces exist before continuing.
 * **No IDS output** → Ensure traffic is flowing (make sure ns3 is running: `ddosim -d <N> ns3`) and that IDS is running with the command above.
 * **Logs / artifacts**
 
-  * Run logs: `results/logs/<run_id>/`  
-    From your home directory this is typically `~/DDoShield-IoT/results/logs/<run_id>/`.  
-    `ddosim` prints the exact run log path each time you invoke it.
+  * Run logs: All detailed logs from Docker/ns-3 steps are saved under:
+   ```bash
+   results/logs/<run_id>/
+   # e.g., ~/DDoShield-IoT/results/logs/2025-11-16T03-14-12Z/
+   ```
+
+   `ddosim` prints the exact log directory at runtime; if something fails, check the newest log there.
   * Reclaim disk: `docker system prune -a` (careful: removes unused images, stopped
     containers, unused networks, and build cache).
 
@@ -518,7 +509,7 @@ If you explicitly select **Wi-Fi** (`-n wifi`), be aware of an upstream regressi
 * ⚠️ **ns-3 ≥ 3.39**: Wi-Fi + TapBridge may crash/assert. CSMA continues to work normally.
 
 > **Host OS note for ns-3.37:**  
-> ns-3.37 depends on older system libraries. On newer Ubuntu releases (e.g., 24.04) it may fail to configure or build cleanly.  
+> ns-3.37 depends on older system libraries. On newer Ubuntu releases (e.g., 22.04 / 24.04) it may fail to configure or build cleanly.  
 > If you specifically need Wi-Fi with ns-3.37, we recommend running DDoShield-IoT on **Ubuntu 20.04** (or a VM/container based on it), where those older libraries are still available.
 
 **Workarounds**
@@ -527,12 +518,12 @@ If you explicitly select **Wi-Fi** (`-n wifi`), be aware of an upstream regressi
 
   ```bash
   ddosim -d 3 create       # CSMA is default
-````
+  ```
 
 * If you need **Wi-Fi**, pin ns-3 to **3.37**:
 
   ```bash
-  ./install.sh --ns3-version 3.37
+  ./install.sh --ns3-version 3.37 -v
   ddosim -n wifi -d 3 create
   ```
 
