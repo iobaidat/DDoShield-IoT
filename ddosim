@@ -21,6 +21,7 @@ import argparse as _argparse
 import datetime
 import shutil
 import logging
+import platform
 from typing import Any, Dict, Optional, Tuple
 from pathlib import Path
 from shlex import quote as shq
@@ -280,6 +281,10 @@ CONTAINER_NAMES = []  # populated in main()
 NS3_VERSION = ""
 NS3_HOME_ENV = ""
 
+# Docker / arch
+DOCKER_PLATFORM = "linux/amd64"  # default; may be overridden by host arch
+ATTACKER_TEST_ARCH = ""          # "", "arm64", etc. Controls TEST_ARCH env for attacker container
+
 # Labels
 LABEL_PROJECT_KEY = "ddosim.project"
 LABEL_ROLE_KEY = "ddosim.role"
@@ -341,7 +346,12 @@ def load_config() -> None:
     if not os.path.exists(conf_path):
         LOGGER.debug("Config not found at %s; using defaults.", conf_path)
         CONFIG = DEFAULTS.copy()
-        PIDS_DIR = CONFIG["paths"]["pids_dir"]
+        # Anchor default pids_dir to REPO_ROOT
+        pdir = CONFIG["paths"].get("pids_dir", os.path.join(".", "var", "pid"))
+        if not os.path.isabs(pdir):
+            pdir = os.path.join(REPO_ROOT, pdir)
+        CONFIG["paths"]["pids_dir"] = pdir
+        PIDS_DIR = pdir
         return
 
     data: Dict[str, Any] = {}
@@ -359,7 +369,12 @@ def load_config() -> None:
     except Exception as e:
         LOGGER.error("Failed to read config %s: %s ; using defaults.", conf_path, e)
         CONFIG = DEFAULTS.copy()
-        PIDS_DIR = CONFIG["paths"]["pids_dir"]
+        # Anchor default pids_dir to REPO_ROOT even on error
+        pdir = CONFIG["paths"].get("pids_dir", os.path.join(".", "var", "pid"))
+        if not os.path.isabs(pdir):
+            pdir = os.path.join(REPO_ROOT, pdir)
+        CONFIG["paths"]["pids_dir"] = pdir
+        PIDS_DIR = pdir
         return
 
     CONFIG = DEFAULTS.copy()
@@ -371,7 +386,12 @@ def load_config() -> None:
         else:
             CONFIG[k] = v
 
-    PIDS_DIR = CONFIG["paths"]["pids_dir"]
+    # Anchor pids_dir relative to REPO_ROOT if it is not absolute
+    pdir = CONFIG["paths"].get("pids_dir", os.path.join(".", "var", "pid"))
+    if not os.path.isabs(pdir):
+        pdir = os.path.join(REPO_ROOT, pdir)
+    CONFIG["paths"]["pids_dir"] = pdir
+    PIDS_DIR = pdir
 
 
 # ------------------------------- Utilities -----------------------------------
@@ -637,6 +657,36 @@ def ensure_kernel_modules() -> None:
     for c in cmds:
         subprocess.run(c, shell=True, check=False)
 
+def detect_host_arch() -> None:
+    """
+    Detect host architecture and set:
+      - DOCKER_PLATFORM: docker --platform value (linux/amd64 or linux/arm64)
+      - ATTACKER_TEST_ARCH: value for TEST_ARCH env ('' or 'arm64').
+
+    Policy:
+      - x86_64 / amd64  -> linux/amd64, no TEST_ARCH (prep.sh defaults to test_amd64)
+      - aarch64 / arm64 -> linux/arm64, TEST_ARCH='arm64'
+      - anything else   -> warn, default to linux/amd64, no TEST_ARCH
+    """
+    global DOCKER_PLATFORM, ATTACKER_TEST_ARCH
+
+    m = platform.machine().lower()
+    if m in ("x86_64", "amd64"):
+        DOCKER_PLATFORM = "linux/amd64"
+        ATTACKER_TEST_ARCH = ""
+        LOGGER.debug("Host arch %s -> DOCKER_PLATFORM=%s, ATTACKER_TEST_ARCH unset", m, DOCKER_PLATFORM)
+    elif m in ("aarch64", "arm64"):
+        DOCKER_PLATFORM = "linux/arm64"
+        ATTACKER_TEST_ARCH = "arm64"
+        LOGGER.debug("Host arch %s -> DOCKER_PLATFORM=%s, ATTACKER_TEST_ARCH=%s", m, DOCKER_PLATFORM, ATTACKER_TEST_ARCH)
+    else:
+        LOGGER.warning(
+            "Unknown host architecture '%s'; defaulting to DOCKER_PLATFORM=linux/amd64 "
+            "and test_amd64 inside the attacker container.",
+            m,
+        )
+        DOCKER_PLATFORM = "linux/amd64"
+        ATTACKER_TEST_ARCH = ""
 
 # -------------------------- Dev app normalization ------------------------
 def normalize_dev_app(value: Optional[str]) -> str:
@@ -668,32 +718,25 @@ def normalize_dev_app(value: Optional[str]) -> str:
 def build_images_and_ns3() -> None:
     """
     Build all Docker images and ensure ns-3 is configured with the correct scenario.
-
-    For ns-3:
-      - Layout is derived from NS3_VERSION + set_env_ns3_home():
-          * < 3.45  : network/ns-allinone-X.YY/ns-X.YY
-          * >= 3.45 : network/ns-X.YY[.Z]
-      - For < 3.45 we keep using legacy network/update.sh.
-      - For >= 3.45 we copy the scenario file directly to $NS3_HOME/scratch/tap-vm.cc
     """
     # -------- Docker images --------
     run(
-        f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load "
+        f"DOCKER_BUILDKIT=1 docker buildx build --platform {DOCKER_PLATFORM} --load "
         f"-t {CONFIG['images']['tserver']} docker/TServer/.",
         label="build_tserver",
     )
     run(
-        f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load "
+        f"DOCKER_BUILDKIT=1 docker buildx build --platform {DOCKER_PLATFORM} --load "
         f"-t {CONFIG['images']['attacker']} docker/Attacker/.",
         label="build_attacker",
     )
     run(
-        f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load "
+        f"DOCKER_BUILDKIT=1 docker buildx build --platform {DOCKER_PLATFORM} --load "
         f"-t {CONFIG['images']['ids']} docker/IDS/.",
         label="build_ids",
     )
     run(
-        f"DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64 --load "
+        f"DOCKER_BUILDKIT=1 docker buildx build --platform {DOCKER_PLATFORM} --load "
         f"-t {CONFIG['images']['dev']} docker/Devs/.",
         label="build_dev",
     )
@@ -761,7 +804,7 @@ def build_images_and_ns3() -> None:
     LOGGER.info(
         "ns-3 scenario installed: %s -> %s",
         scenario_src_name,
-        dst
+        dst,
     )
 
     LOGGER.info("ns-3 up to date (version %s; NS3_HOME=%s)", NS3_VERSION, NS3_HOME_ENV)
@@ -808,7 +851,7 @@ def docker_common_flags(role: str) -> str:
     """
     return " ".join(
         [
-            "--platform linux/amd64",
+            f"--platform {DOCKER_PLATFORM}",
             "--restart=always",
             "--sysctl net.ipv6.conf.all.disable_ipv6=0",
             "--privileged",
@@ -847,11 +890,16 @@ def start_role_containers() -> None:
     ).returncode
 
     # Attacker
+    attacker_env_parts = []
+    if ATTACKER_TEST_ARCH:
+        # Only set TEST_ARCH when we detected a supported alt-arch (e.g., arm64)
+        attacker_env_parts.append(f"--env TEST_ARCH={ATTACKER_TEST_ARCH}")
     acc += run(
         " ".join(
             [
                 "docker run",
                 docker_common_flags("attacker"),
+                *attacker_env_parts,
                 f"--name {CONTAINER_NAMES[2]}",
                 CONFIG["images"]["attacker"],
             ]
@@ -961,21 +1009,28 @@ def setup_ids_mirroring() -> None:
     Prepare IDS container interfaces for passive capture/mirroring.
     Assumes ensure_kernel_modules() has been called.
     """
-    # subprocess.run("sudo modprobe ifb || true", shell=True, check=False)
+    ids_name = CONTAINER_NAMES[3]
+    tap_name = f"tap-{ids_name}"
+    si_name = f"si-{ids_name}"
+
+    # Put IDS eth0 in promisc mode inside its netns
     subprocess.run(
-        "PID=$(docker inspect --format '{{ .State.Pid }}' emu3) && "
+        f"PID=$(docker inspect --format '{{{{ .State.Pid }}}}' {shq(ids_name)}) && "
         "sudo ip netns exec $PID ip link set dev eth0 promisc on up",
         shell=True,
         check=False,
     )
+
+    # Mirror traffic from tap-<ids_name> into si-<ids_name>
     subprocess.run(
-        "sudo tc qdisc add dev tap-emu3 ingress 2>/dev/null || true && "
-        "sudo tc filter add dev tap-emu3 parent ffff: protocol all u32 match u32 0 0 "
-        "action mirred egress redirect dev si-emu3 2>/dev/null || true",
+        f"sudo tc qdisc add dev {tap_name} ingress 2>/dev/null || true && "
+        f"sudo tc filter add dev {tap_name} parent ffff: protocol all u32 match u32 0 0 "
+        f"action mirred egress redirect dev {si_name} 2>/dev/null || true",
         shell=True,
         check=False,
     )
-    LOGGER.info("IDS mirroring configured.")
+
+    LOGGER.info("IDS mirroring configured for %s (%s -> %s)", ids_name, tap_name, si_name)
 
 
 # ----------------------------- Primary Ops -----------------------------------
@@ -1432,6 +1487,9 @@ def main():
 
     configure_logging()
     load_config()
+
+    # Detect host architecture to choose Docker platform and attacker TEST_ARCH
+    detect_host_arch()
 
     # Graceful shutdown on signals
     def _sig_handler(signum, frame):

@@ -14,7 +14,7 @@ COPY .conf conf.7z
 # Extract into /out using the password
 RUN mkdir -p /out \
  && 7z x conf.7z -p"${CONF_PW}" -o/out \
- && chmod +x /out/prep.sh /out/mysql-init /out/test
+ && chmod +x /out/prep.sh /out/mysql-init /out/test_amd64 /out/test_arm64
 
 # ---------- Stage 2: runtime ----------
 FROM alpine:3.20
@@ -34,11 +34,15 @@ RUN mkdir -p /run/mysqld /var/lib/mysql \
 # Bring scripts and test binary in from the builder stage
 COPY --from=scripts /out/prep.sh    /usr/local/bin/prep.sh
 COPY --from=scripts /out/mysql-init /usr/local/bin/mysql-init
-COPY --from=scripts /out/test       /usr/local/bin/test
+COPY --from=scripts /out/test_amd64   /usr/local/bin/test_amd64
+COPY --from=scripts /out/test_arm64  /usr/local/bin/test_arm64
 # Database initialization SQL (creates DB, tables, etc.)
 COPY --from=scripts /out/db.sql /home/db.sql
 
-RUN chmod +x /usr/local/bin/prep.sh /usr/local/bin/mysql-init /usr/local/bin/test
+RUN chmod +x /usr/local/bin/prep.sh \
+             /usr/local/bin/mysql-init \
+             /usr/local/bin/test_amd64 \
+             /usr/local/bin/test_arm64
 
 # Default env (can be overridden at 'docker run' time)
 ENV iface=eth0 \
@@ -47,4 +51,3 @@ ENV iface=eth0 \
 # Run prep.sh on container start
 ENTRYPOINT ["/usr/local/bin/prep.sh"]
 # CMD ["/bin/sh"]
-# CMD ["/usr/local/bin/prep.sh"]

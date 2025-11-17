@@ -11,6 +11,7 @@ DDoShield-IoT is an open-source testbed to **simulate IoT botnet DDoS traffic**,
 
 ## Requirements
 - OS: **Ubuntu 22.04/24.04** or **Debian 12**
+- CPU architecture: **x86_64 (Intel/AMD)** or **arm64 (Apple Silicon, etc.)**
 - Hardware: ≥ **4 CPU cores**, **8 GB RAM** (16 GB+ recommended), **25 GB** free disk
 - Python: **3.8 or newer** (tested with **3.8–3.12**)
 - Internet access during install
@@ -28,6 +29,14 @@ This is expected. If you’re on a shared system, make sure you’re allowed to 
 
 > **Note:** DDoShield-IoT is designed for Linux hosts (Ubuntu/Debian).  
 > It relies on `ip netns`, tap interfaces, and kernel modules that are not available on Windows or macOS without heavy virtualization.
+> **Architecture support (x86_64 & ARM64)**  
+> DDoShield-IoT automatically detects whether your Linux host is **x86_64** or **arm64** and builds matching Docker images for that architecture.  
+> 
+> On newer Apple Silicon Macs (M1/M2/M3), the recommended setup is:
+> - Run a **Linux VM** (Ubuntu 22.04/24.04 or Debian 12) using an **ARM64** image.
+> - Inside that VM, follow the normal `install.sh` and `ddosim` instructions.
+> 
+> This way, all Docker containers and ns-3 run natively on arm64 (no emulation, no cross-architecture Docker setup). If you use an x86_64 Linux VM on Apple Silicon, everything will still work but will incur full CPU emulation and be significantly slower.
 
 ---
 
@@ -482,6 +491,7 @@ Run with `-v info` or `-v debug`. The header shows active settings (including �
 * **First `create` is slow** → Images are being built and cached; later runs are faster.
 * **“Error creating container side bridges”** → Re-run `ddosim -d <N> ns3` after `create`; ensure interfaces exist before continuing.
 * **No IDS output** → Ensure traffic is flowing (make sure ns3 is running: `ddosim -d <N> ns3`) and that IDS is running with the command above.
+* **“exec format error” when starting containers** → Make sure your Linux VM architecture matches your host (e.g., ARM64 Ubuntu on Apple Silicon) and that you didn’t mix x86_64 and arm64 Docker images.
 * **Logs / artifacts**
 
   * Run logs: All detailed logs from Docker/ns-3 steps are saved under:

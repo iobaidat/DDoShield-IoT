@@ -524,7 +524,12 @@ if [[ $DO_DOCKER -eq 1 && $DO_BUILDX -eq 1 ]]; then
   apt_update_retry
   apt_install qemu-user-static
   as_root "apt-get install -y -qq binfmt-support || true"
-  run "qemu-x86_64-static --version" "qemu multi-arch check"
+
+  if command -v qemu-x86_64-static >/dev/null 2>&1; then
+    run "qemu-x86_64-static --version" "qemu multi-arch check"
+  else
+    warn "qemu-x86_64-static not found; cross-arch Docker emulation may be limited."
+  fi
 
   info "Installing Docker Buildx..."
   apt_update_retry
