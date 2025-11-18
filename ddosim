@@ -631,6 +631,116 @@ def pid_exists(pid: int) -> bool:
         return False
 
 
+def reset_terminal() -> None:
+    """
+    Best-effort reset of TTY settings so the user's shell is usable again.
+    Safe to call even when stdin is not a TTY.
+    """
+    try:
+        if sys.stdin.isatty():
+            subprocess.run("stty sane", shell=True, check=False)
+    except Exception:
+        # Never let TTY reset itself crash the program
+        pass
+
+
+def stop_ns3_watchdog() -> None:
+    """
+    Stop any background ns-3 watchdog process started by run_ns3.
+    Safe to call even if no watchdog is running.
+    """
+    wd_pid = read_pidfile("ns3_watchdog")
+    if wd_pid is None:
+        return
+
+    try:
+        os.kill(wd_pid, signal.SIGTERM)
+    except Exception:
+        pass
+
+    # Wait briefly for it to exit
+    for _ in range(10):
+        if not os.path.exists(f"/proc/{wd_pid}"):
+            break
+        time.sleep(0.1)
+
+    # If still alive, force kill
+    if os.path.exists(f"/proc/{wd_pid}"):
+        try:
+            os.kill(wd_pid, signal.SIGKILL)
+        except Exception:
+            pass
+
+    try:
+        os.remove(os.path.join(PIDS_DIR, "ns3_watchdog"))
+    except Exception:
+        pass
+
+
+def start_ns3_watchdog() -> None:
+    """
+    Start or restart the background watchdog that monitors ns-3 and prints a
+    message if it stops. Only used for the 'ns3' operation (interactive detach).
+
+    The watchdog:
+      - polls the ns-3 PID from PIDS_DIR/ns3 every 10 seconds
+      - prints a message once ns-3 stops or the pidfile disappears
+      - then exits
+    """
+    ns3_pid = read_pidfile("ns3")
+    if not ns3_pid or not pid_exists(ns3_pid):
+        LOGGER.debug(
+            "Not starting watchdog: ns-3 pidfile missing or ns-3 not running."
+        )
+        return
+
+    # Ensure only one watchdog at a time
+    stop_ns3_watchdog()
+
+    # Small Python script that watches the ns3 pidfile
+    watcher_code = f"""import os, time
+pids_dir = {PIDS_DIR!r}
+hint = "Press Enter in this terminal, then run 'ddosim ns3' to restart or 'ddosim destroy' to clean up."
+ns3_file = os.path.join(pids_dir, "ns3")
+
+while True:
+    try:
+        with open(ns3_file, "r") as f:
+            pid_str = f.read().strip()
+    except FileNotFoundError:
+        print("\\n[ddosim watchdog] ns-3 PID file missing; ns-3 may have stopped. " + hint, flush=True)
+        break
+
+    if not pid_str:
+        print("\\n[ddosim watchdog] ns-3 PID file empty; ns-3 may have stopped. " + hint, flush=True)
+        break
+
+    try:
+        pid = int(pid_str)
+    except ValueError:
+        print("\\n[ddosim watchdog] ns-3 PID file corrupted; ns-3 may have stopped. " + hint, flush=True)
+        break
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        print("\\n[ddosim watchdog] ns-3 (pid %d) has stopped. " % pid + hint, flush=True)
+        break
+    except PermissionError:
+        # Treat as alive; just keep watching
+        pass
+
+    time.sleep(10)
+"""
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", watcher_code],
+        preexec_fn=os.setsid,  # own process group (easier to kill if needed)
+    )
+    write_pidfile("ns3_watchdog", str(proc.pid))
+    LOGGER.debug("Started ns-3 watchdog (pid=%d)", proc.pid)
+
+
 def ensure_sudo() -> None:
     """
     Ensure we have a valid sudo timestamp; prompt the user if needed.
@@ -1084,6 +1194,9 @@ def run_ns3(return_proc: bool = False):
     existing_pid = read_pidfile("ns3")
     if existing_pid and pid_exists(existing_pid):
         LOGGER.info("ns-3 is still running with pid = %d", existing_pid)
+        # If we are in the interactive 'ns3' operation, (re)start the watchdog
+        if not return_proc:
+            start_ns3_watchdog()
         return None
 
     LOGGER.info(
@@ -1126,6 +1239,7 @@ def run_ns3(return_proc: bool = False):
 
     # IMPORTANT:
     # Start ns-3 in its own process group so we can cleanly kill the whole group later.
+    start_mono = time.monotonic()
     proc = subprocess.Popen(
         ns3_cmd,
         shell=True,
@@ -1143,25 +1257,60 @@ def run_ns3(return_proc: bool = False):
         return proc
 
     # Give it a moment to spin up
-    time.sleep(10)
+    boot_wait = min(10.0, float(EMULATION_TIME_SEC) / 2.0)
+    time.sleep(max(1.0, boot_wait))
     proc.poll()
 
-    try:
-        input("\nPress Enter to leave ns-3 running in the background…")
-    except EOFError:
-        # Non-interactive environment (no TTY): just continue
-        pass
+    # If ns-3 is already dead at the boot-wait mark, remember that as an "early crash".
+    died_during_boot = (proc.returncode is not None) or (not pid_exists(proc.pid))
+
+    if sys.stdin.isatty():
+        try:
+            input("\nPress Enter to leave ns-3 running in the background…\n")
+        except EOFError:
+            pass
+    else:
+        # No TTY: pretend enter was pressed immediately
+        LOGGER.debug("No TTY; skipping Enter prompt for ns-3 detach.")
+
+    press_time = time.monotonic()
 
     # After user confirmation, verify ns-3 is still alive
     proc.poll()
-    if proc.returncode is not None or not pid_exists(proc.pid):
-        LOGGER.error(
-            "ns-3 appears to have terminated unexpectedly. "
-            "Aborting and tearing down the environment."
-        )
-        destroy_environment()
-        sys.exit(2)
+    alive = (proc.returncode is None) and pid_exists(proc.pid)
+    if not alive:
+        elapsed = press_time - start_mono
+        early_threshold = EMULATION_TIME_SEC / 4.0  # "early failure" cutoff
 
+        if died_during_boot or elapsed <= early_threshold:
+            # ns-3 died "too early" → assume something went wrong and tear down.
+            LOGGER.error(
+                "ns-3 appears to have terminated unexpectedly after %.1f seconds "
+                "(threshold %.1f s). Aborting and tearing down the environment.",
+                elapsed,
+                early_threshold,
+            )
+            destroy_environment()
+            sys.exit(2)
+        else:
+            # ns-3 ran long enough; leave env intact so the user can inspect or rerun.
+            LOGGER.warning(
+                "ns-3 is no longer running (ran for ~%.1f seconds, simulation time=%s). "
+                "The environment is left intact. You can run 'ddosim ns3' to start a new "
+                "simulation or 'ddosim destroy' to clean everything up.",
+                elapsed,
+                EMULATION_TIME_SEC,
+            )
+            # Clear stale ns-3 PID file so future checks reflect reality.
+            try:
+                os.remove(os.path.join(PIDS_DIR, "ns3"))
+            except Exception:
+                pass
+            return None
+
+
+    # Start/refresh watchdog only in detached mode ('ddosim ns3')
+    start_ns3_watchdog()
     LOGGER.info("Running ns-3 in the background | %s", datetime.datetime.now())
 
     return None
@@ -1244,8 +1393,12 @@ def destroy_environment() -> None:
     LOGGER.info("Destroying environment...")
     ensure_sudo()
 
+    # Stop ns-3 watchdog (if any)
+    stop_ns3_watchdog()
+
     # --- Stop ns-3 (if running) using process group ---
     ns3_pid = read_pidfile("ns3")
+
     if ns3_pid and os.path.exists(f"/proc/{ns3_pid}"):
         try:
             ns3_pid_int = int(ns3_pid)
@@ -1342,6 +1495,9 @@ def destroy_environment() -> None:
             shutil.rmtree(PIDS_DIR)
         except Exception:
             pass
+
+    # Best-effort TTY reset in case any child process left it in a bad state
+    reset_terminal()
 
     LOGGER.info("Destroy complete")
 
@@ -1494,9 +1650,13 @@ def main():
     # Graceful shutdown on signals
     def _sig_handler(signum, frame):
         LOGGER.warning("Interrupt signal received.")
-        destroy_environment()
-        LOGGER.info("Exiting...")
-        sys.exit(0)
+        try:
+            destroy_environment()
+        finally:
+            # Always try to restore TTY before exiting
+            reset_terminal()
+            LOGGER.info("Exiting...")
+            sys.exit(0)
 
     signal.signal(signal.SIGINT, _sig_handler)
     signal.signal(signal.SIGTSTP, _sig_handler)
