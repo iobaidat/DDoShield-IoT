@@ -145,10 +145,11 @@ By default, Devs choose **one** app at container start and **stick to it** for t
 
 **Behavior**
 
-* `-a all` (default): each Dev randomly selects one of `{ffmpeg, http, ftp}` at first start and uses it for the entire run.
-* `-a ffmpeg`: all Devs use RTMP push to **10.0.0.1:1935**.
+* `-a all` (default): each Dev randomly selects one of `{rtmp, http, ftp}` at first start and uses it for the entire run.
+* `-a rtmp`: all Devs stream via RTMP to **10.0.0.1:1935**.
 * `-a http`: all Devs repeatedly GET files from **10.0.0.1:80**.
 * `-a ftp`: all Devs repeatedly fetch files via FTP from **10.0.0.1:21**.
+* `-a http,ftp` (or any comma-separated subset such as `rtmp,http` or `rtmp,ftp`): each Dev randomly chooses **one** app from that subset and sticks with it for the lifetime of the container.
 
 **Examples**
 
@@ -160,7 +161,10 @@ ddosim -d 3 -v debug create
 ddosim -d 3 -a http -v debug create
 
 # Force RTMP for all Devs
-ddosim -d 3 -a ffmpeg -v debug create
+ddosim -d 3 -a rtmp -v debug create
+
+# Allow only HTTP or FTP (each Dev picks one of the two)
+ddosim -d 3 -a http,ftp -v debug create
 ```
 
 **Notes**
@@ -425,7 +429,7 @@ network_type: csma      # csma | wifi
 churn_mode: "0"         # "0"=none, "1"=static, "2"=dynamic
 ns3_file_log_mode: "0"  # "0"=off, "1"=pcap only, "2"=pcap+stats
 
-dev_app: all            # all | ffmpeg | http | ftp
+dev_app: all            # all | rtmp | http | ftp | e.g., "rtmp,ftp"
 
 images:
   tserver: tserver
@@ -453,11 +457,11 @@ build_jobs: 7            # parallel build jobs for ns-3 (tune per host)
 * `scenario_size_meters` *(str/int)*: Only for `wifi`; scene size in meters.
 * `build_jobs` *(int)*: Parallel jobs when building ns-3 (`./ns3 build -j N`).
 * `dev_app` *(str)*: Traffic generator used by Devs:
-
-  * `all`: each Dev randomly picks **one** app at first start and persists it
-  * `ffmpeg`: all Devs stream via RTMP to `10.0.0.1:1935`
-  * `http`: all Devs fetch via HTTP from `10.0.0.1:80`
-  * `ftp`: all Devs fetch via FTP from `10.0.0.1:21`
+  * `all`: each Dev randomly picks **one** app (`rtmp`, `http`, or `ftp`) at first start and persists it.
+  * `rtmp`: all Devs stream via RTMP to `10.0.0.1:1935`.
+  * `http`: all Devs fetch via HTTP from `10.0.0.1:80`.
+  * `ftp`: all Devs fetch via FTP from `10.0.0.1:21`.
+  * comma-separated subset (e.g. `rtmp,ftp` or `http,ftp`): each Dev randomly chooses one app from the subset and keeps that choice for the lifetime of the container.
 * `images` *(map)*: Docker image tags for each role (`tserver`, `attacker`, `ids`, `dev`).
 * `paths.results_subdir` *(str)*: Directory under the repo where logs/results go.
 * `paths.pids_dir` *(str)*: PID files for container/process bookkeeping.

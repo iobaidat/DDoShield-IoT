@@ -48,7 +48,7 @@ DEFAULTS: Dict[str, Any] = {
         "pids_dir": os.path.join(".", "var", "pid"),
     },
     "destroy_scope": "project",  # project | run | all
-    "dev_app": "all",            # app policy for Devs: all|ffmpeg|http|ftp
+    "dev_app": "all",            # app policy for Devs: all|rtmp|http|ftp
 }
 
 CONFIG: Dict[str, Any] = DEFAULTS.copy()
@@ -798,31 +798,6 @@ def detect_host_arch() -> None:
         DOCKER_PLATFORM = "linux/amd64"
         ATTACKER_TEST_ARCH = ""
 
-# -------------------------- Dev app normalization ------------------------
-def normalize_dev_app(value: Optional[str]) -> str:
-    """
-    Normalize CLI/config app selection into Docker APP_CMD:
-      'all' | 'run_ffmpeg' | 'run_curl_http' | 'run_curl_ftp'
-
-    Accepts: all, ffmpeg, http, ftp (case-insensitive).
-    """
-    if not value:
-        return "all"
-
-    w = value.strip().lower()
-
-    if w in ("all", "any", "random"):
-        return "all"
-    if w == "ffmpeg":
-        return "run_ffmpeg"
-    if w == "http":
-        return "run_curl_http"
-    if w == "ftp":
-        return "run_curl_ftp"
-
-    # Fallback: behave like "all"
-    return "all"
-
 
 # -------------------------- Setup / Build ------------------------------------
 def build_images_and_ns3() -> None:
@@ -1044,9 +1019,9 @@ def start_role_containers() -> None:
     #  -e SERVER_IP=10.0.0.1 \
     #  -e BW_RERANDOMIZE=true -e BW_RERANDOMIZE_MINUTES=10
     #  -e PAUSE_BETWEEN_FILES=true -e PAUSE_MAX_SECS=3
-    #  -e APP_CMD=run_ffmpeg #(or run_curl_http, run_curl_ftp)
+    #  -e APP_CMD=rtmp #(or all, http, ftp, or comma-separated subset like 'rtmp,ftp')
 
-    app_env = normalize_dev_app(CONFIG.get("dev_app", "all"))
+    app_env = CONFIG.get("dev_app", "all") or "all"
     for i in range(NUM_INFRA_NODES + 1, NUM_NODES + 1):
         acc += run(
             " ".join(
@@ -1515,7 +1490,7 @@ Tips:
   • Default verbosity is 'quiet' (clean console).
   • Use '-v debug' for maximum detail, or:
       -v info     | -v verbose     | -v quiet
-  • Choose Dev app behavior: -a all|ffmpeg|http|ftp (default: all)
+  • Choose Dev app behavior: -a all|rtmp|http|ftp or comma-separated subset (e.g. 'rtmp,ftp') (default: all)
   • Config file: config.yaml (or set DDOSIM_CONFIG=/path/to/file).
   • Colors: --color auto|always|never. \n \n
 """.format(
@@ -1622,8 +1597,16 @@ Tips:
         "-a",
         "--app",
         "--dev-app",
-        choices=["all","ffmpeg","http","ftp"],
-        help="App behavior for Devs: 'all' (default) = each Dev picks one randomly and persists; or force one: ffmpeg|http|ftp",
+        type=str,
+        help=(
+            "App behavior for Devs. "
+            "'all' (default) = each Dev picks one of rtmp|http|ftp randomly and "
+            "persists that choice. You can also force a single app (rtmp|http|ftp) "
+            "or pass a comma-separated subset such as 'rtmp,ftp' so each Dev "
+            "randomly chooses one app from that subset and keeps it for the "
+            "lifetime of the container."
+            "If omitted, the value from config.yaml is used (default: all)."
+        ),
     )
 
     if len(sys.argv) == 1:
