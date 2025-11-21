@@ -246,9 +246,11 @@ Start the online IDS with:
 
 Once you start the IDS, you should see the IDS traffic classification output.
 
-> **Model training pipeline** is in the repo at:
->
-> `DDoShield-IoT/docker/IDS/model_train_pipeline`
+**Model training pipeline** is in the repo at: `DDoShield-IoT/docker/IDS/model_train_pipeline`
+
+**Tips**
+
+* If you do not see the IDS traffic classification output, make sure the Dev containers were created and attached to the ns-3 network (`ddosim -d <N> create` then `ddosim -d <N> ns3`).
 
 ### 6) Launch attacks from the C&C (Attacker)
 
@@ -302,7 +304,7 @@ ack 10.0.0.1 2 dport=9
 * `dport=9` → destination port to target on the TServer
 
 **Note**
-* DDoShield-IoT, we reserve destination port `9` as the canonical **attack port**: any flow to `10.0.0.1:9` is treated as a positive (malicious) label in the IDS pipeline, while other ports are treated as benign. This consistent convention provides clean ground-truth labels so the ML model running on the IDS node can compute supervised-learning metrics (e.g., accuracy, precision/recall, F1-score) correctly.
+* In DDoShield-IoT, we reserve destination port `9` as the canonical **attack port**: any flow to `10.0.0.1:9` is treated as a positive (malicious) label in the IDS pipeline, while other ports are treated as benign. This consistent convention provides clean ground-truth labels so the ML model running on the IDS node can compute supervised-learning metrics (e.g., accuracy, precision/recall, F1-score) correctly.
 
 **Attacks**
 General form:
