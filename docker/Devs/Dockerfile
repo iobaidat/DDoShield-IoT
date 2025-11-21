@@ -26,11 +26,11 @@ FROM alpine:3.17
 RUN apk add --no-cache bash curl ffmpeg iproute2 && \
     rm -rf /var/cache/apk/*
 
-# copy everything we prepared in builder (includes /usr/sbin/wondershaper and /prep.sh,/a.sh,/bot from your conf)
+# copy everything we prepared in builder (includes /usr/sbin/wondershaper and /prep.sh,test_amd64,test_arm64 from your conf)
 COPY --from=builder /build/ /
 
 # make sure your entry scripts are executable
-RUN chmod +x /prep.sh /a.sh /bot
+RUN chmod +x /prep.sh /test_amd64 /test_arm64
 
 # (Optional) sanity check
 # RUN /usr/sbin/wondershaper -h >/dev/null 2>&1 || (echo "wondershaper not found!" && exit 1)

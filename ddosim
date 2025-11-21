@@ -1022,12 +1022,19 @@ def start_role_containers() -> None:
     #  -e APP_CMD=rtmp #(or all, http, ftp, or comma-separated subset like 'rtmp,ftp')
 
     app_env = CONFIG.get("dev_app", "all") or "all"
+
+    # Reuse the same arch hint we already use for the attacker
+    dev_env_parts: list[str] = []
+    if ATTACKER_TEST_ARCH:
+        dev_env_parts.append(f"--env TEST_ARCH={ATTACKER_TEST_ARCH}")
+
     for i in range(NUM_INFRA_NODES + 1, NUM_NODES + 1):
         acc += run(
             " ".join(
                 [
                     "docker run",
                     docker_common_flags("dev"),
+                    *dev_env_parts,
                     f"--env APP_CMD={shq(app_env)}",
                     f"--mount type=bind,src={shq(str(dataset))},dst=/data,ro",
                     f"--name {CONTAINER_NAMES[i]}",
