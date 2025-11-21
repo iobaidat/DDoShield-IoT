@@ -214,7 +214,7 @@ ddosim -d 10 -i 50 -v debug create
 
 **Notes**
 
-* `-i` affects only whether the Dev runs the DDoS test client.
+* `-i` affects only whether the Dev runs the DDoS bot client.
 * All Devs still generate their chosen background traffic (RTMP/HTTP/FTP) according to `-a`.
 
 ### 4) Start the ns-3 network
@@ -461,7 +461,7 @@ churn_mode: "0"         # "0"=none, "1"=static, "2"=dynamic
 ns3_file_log_mode: "0"  # "0"=off, "1"=pcap only, "2"=pcap+stats
 
 dev_app: all            # all | rtmp | http | ftp | e.g., "rtmp,ftp"
-infected_pct: 100       # 0–100; % of Devs that run the DDoS test client
+infected_pct: 100       # 0–100; % of Devs that run the DDoS bot
 
 images:
   tserver: tserver
