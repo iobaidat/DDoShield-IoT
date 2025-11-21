@@ -49,6 +49,7 @@ DEFAULTS: Dict[str, Any] = {
     },
     "destroy_scope": "project",  # project | run | all
     "dev_app": "all",            # app policy for Devs: all|rtmp|http|ftp
+    "infected_pct": 100.0,  # default: all Devs infected (run test client)
 }
 
 CONFIG: Dict[str, Any] = DEFAULTS.copy()
@@ -142,6 +143,7 @@ def print_run_context(op: str) -> None:
         ),
         ("NS3 File Log", _ns3_log_label(NS3_FILE_LOG_MODE)),
         ("Dev App Policy", CONFIG.get("dev_app", "all")),
+        ("Infected Devs", f"{NUM_INFECTED_DEVS} ({INFECTED_PCT:.1f}%)"),
         ("Project label", str(CONFIG["project_label"])),
         ("Destroy scope", str(CONFIG["destroy_scope"])),
         ("Run ID", RUN_ID),
@@ -195,6 +197,9 @@ class ColorHelpFormatter(_argparse.RawTextHelpFormatter):
             ),
             "app": CONFIG.get(
                 "dev_app", DEFAULTS["dev_app"]
+            ),
+            "infected": CONFIG.get(
+                "infected_pct", DEFAULTS["infected_pct"]
             ),
         }
 
@@ -267,6 +272,14 @@ RUN_ID: str = os.environ.get(
 NUM_INFRA_NODES = 3  # TServer, Attacker, IDS
 NUM_DEVS = CONFIG["num_devs"]
 NUM_NODES = NUM_INFRA_NODES + NUM_DEVS
+
+INFECTED_PCT = float(CONFIG.get("infected_pct", DEFAULTS["infected_pct"]))
+NUM_INFECTED_DEVS = NUM_DEVS  # default: all Devs infected
+
+# round to nearest integer Dev (0..NUM_DEVS)
+NUM_INFECTED_DEVS = int(NUM_DEVS * INFECTED_PCT / 100.0 + 0.5)
+if NUM_INFECTED_DEVS > NUM_DEVS:
+    NUM_INFECTED_DEVS = NUM_DEVS
 
 EMULATION_TIME_SEC = CONFIG["emulation_time_sec"]
 CHURN_MODE = CONFIG["churn_mode"]
@@ -1029,12 +1042,19 @@ def start_role_containers() -> None:
         dev_env_parts.append(f"--env TEST_ARCH={ATTACKER_TEST_ARCH}")
 
     for i in range(NUM_INFRA_NODES + 1, NUM_NODES + 1):
+        dev_idx = i - NUM_INFRA_NODES
+
+        # Infection: first NUM_INFECTED_DEVS get INFECTED=1, rest INFECTED=0
+        infected = dev_idx <= NUM_INFECTED_DEVS
+        infected_env = "--env INFECTED=1" if infected else "--env INFECTED=0"
+
         acc += run(
             " ".join(
                 [
                     "docker run",
                     docker_common_flags("dev"),
                     *dev_env_parts,
+                    infected_env,
                     f"--env APP_CMD={shq(app_env)}",
                     f"--mount type=bind,src={shq(str(dataset))},dst=/data,ro",
                     f"--name {CONTAINER_NAMES[i]}",
@@ -1615,6 +1635,18 @@ Tips:
             "If omitted, the value from config.yaml is used (default: all)."
         ),
     )
+    parser.add_argument(
+        "-i",
+        "--infected",
+        dest="infected",
+        type=float,
+        default=None,
+        help=(
+            "Percentage [0–100] of Dev nodes that are infected "
+            "(run the DDoS test client). Defaults to config value "
+            "or 100 if not specified."
+        ),
+    )
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -1629,7 +1661,7 @@ def main():
     """
     global NUM_DEVS, EMULATION_TIME_SEC, CHURN_MODE, NS3_FILE_LOG_MODE
     global NETWORK_TYPE, SCENARIO_SIZE_METERS, BUILD_JOBS, NUM_NODES, CONTAINER_NAMES
-    global CONTAINER_BASENAME
+    global CONTAINER_BASENAME, INFECTED_PCT, NUM_INFECTED_DEVS
 
     configure_logging()
     load_config()
@@ -1687,6 +1719,13 @@ def main():
         CONFIG["destroy_scope"] = args.destroy_scope
     if args.app is not None:
         CONFIG["dev_app"] = args.app
+    if getattr(args, "infected", None) is not None:
+        pct = float(args.infected)
+        if pct < 0.0:
+            pct = 0.0
+        elif pct > 100.0:
+            pct = 100.0
+        CONFIG["infected_pct"] = pct
 
     # Sync globals
     NUM_DEVS = int(CONFIG.get("num_devs", 1))
@@ -1712,6 +1751,17 @@ def main():
     CONTAINER_BASENAME = CONFIG["container_basename"]
     NUM_NODES = NUM_INFRA_NODES + NUM_DEVS
     CONTAINER_NAMES = [f"{CONTAINER_BASENAME}{i}" for i in range(0, NUM_NODES + 1)]
+
+    INFECTED_PCT = float(CONFIG.get("infected_pct", DEFAULTS["infected_pct"]))
+    if INFECTED_PCT < 0.0:
+        INFECTED_PCT = 0.0
+    elif INFECTED_PCT > 100.0:
+        INFECTED_PCT = 100.0
+
+    # round to nearest integer Dev (0..NUM_DEVS)
+    NUM_INFECTED_DEVS = int(NUM_DEVS * INFECTED_PCT / 100.0 + 0.5)
+    if NUM_INFECTED_DEVS > NUM_DEVS:
+        NUM_INFECTED_DEVS = NUM_DEVS
 
     # Ensure ns-3 environment and results dir before operations
     ensure_results_dir()

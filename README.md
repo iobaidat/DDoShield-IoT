@@ -129,7 +129,6 @@ ddosim --help
 - `-v verbose` – includes child process output (Docker / ns-3).
 - `-v debug`  – maximum detail; recommended for the **first** `create` on a new machine.
 
-
 ### 3) Create nodes
 To create a specific number of Devs (i.e., IoT devices), use the following command:
 
@@ -138,6 +137,19 @@ ddosim -d <N> -v debug create
 # examples: create 3 devices
 ddosim -d 3 -v debug create
 ```
+
+> **Note — First Run Takes Longer**
+> The very first `ddosim -d <N> create` (optionally with `-v debug`) can take a while
+> because Docker builds all node images (Attacker, Devs, TServer, IDS) and pulls base
+> layers. Subsequent runs are **much faster** thanks to Docker layer caching.
+>
+> Tips:
+> - Use `-v debug` once to see build progress (e.g., `ddosim -d 2 -v debug create`).
+>   After the first run you can omit `-v debug` (default output is concise).
+> - Check disk usage with `docker system df`.
+> - To reclaim space later: `docker system prune -a` (removes **unused** images, **stopped**
+>   containers, unused networks, and build cache). After pruning, the next
+>   `ddosim -d <N> create` will rebuild images again from scratch and take longer.
 
 #### Choose Dev traffic app (`-a`)
 
@@ -174,19 +186,36 @@ ddosim -d 3 -a http,ftp -v debug create
 * The per-Dev app choice persists for the container lifetime. To reshuffle: run `destroy`
   and `create` again (or remove `/var/run/selected_app` inside a Dev).
 
+#### Control infected Devs (`-i`)
 
-> **Note — First Run Takes Longer**
-> The very first `ddosim -d <N> create` (optionally with `-v debug`) can take a while
-> because Docker builds all node images (Attacker, Devs, TServer, IDS) and pulls base
-> layers. Subsequent runs are **much faster** thanks to Docker layer caching.
->
-> Tips:
-> - Use `-v debug` once to see build progress (e.g., `ddosim -d 2 -v debug create`).
->   After the first run you can omit `-v debug` (default output is concise).
-> - Check disk usage with `docker system df`.
-> - To reclaim space later: `docker system prune -a` (removes **unused** images, **stopped**
->   containers, unused networks, and build cache). After pruning, the next
->   `ddosim -d <N> create` will rebuild images again from scratch and take longer.
+By default, **all Devs are infected**, meaning each Dev runs the DDoS bot in addition to its chosen traffic app (RTMP/HTTP/FTP).
+
+You can use `-i` to control what fraction of Devs are infected:
+
+* `-i 100` (default): all Devs run the DDoS test client.
+* `-i 0`: no Dev runs the DDoS client (only benign RTMP/HTTP/FTP traffic).
+* `-i 50`: ~50% of Devs are infected (rounded to the nearest integer).  
+  For example, `-d 2 -i 50` infects 1 Dev; `-d 5 -i 50` infects 2 Devs.
+
+Infected Devs are selected deterministically by index (e.g., `emu4`, `emu5`, … up to the requested count), so runs are reproducible.
+
+**Examples**
+
+```bash
+# All Devs infected (default behavior)
+ddosim -d 4 -v debug create
+
+# No Dev infected (all benign traffic)
+ddosim -d 4 -i 0 -v debug create
+
+# Half of Devs infected (approx.)
+ddosim -d 10 -i 50 -v debug create
+```
+
+**Notes**
+
+* `-i` affects only whether the Dev runs the DDoS test client.
+* All Devs still generate their chosen background traffic (RTMP/HTTP/FTP) according to `-a`.
 
 ### 4) Start the ns-3 network
 
@@ -430,6 +459,7 @@ churn_mode: "0"         # "0"=none, "1"=static, "2"=dynamic
 ns3_file_log_mode: "0"  # "0"=off, "1"=pcap only, "2"=pcap+stats
 
 dev_app: all            # all | rtmp | http | ftp | e.g., "rtmp,ftp"
+infected_pct: 100       # 0–100; % of Devs that run the DDoS test client
 
 images:
   tserver: tserver
@@ -462,6 +492,10 @@ build_jobs: 7            # parallel build jobs for ns-3 (tune per host)
   * `http`: all Devs fetch via HTTP from `10.0.0.1:80`.
   * `ftp`: all Devs fetch via FTP from `10.0.0.1:21`.
   * comma-separated subset (e.g. `rtmp,ftp` or `http,ftp`): each Dev randomly chooses one app from the subset and keeps that choice for the lifetime of the container.
+* `infected_pct` *(float)*: Percentage of Dev nodes that run the DDoS bot.  
+  * `100` → all Devs infected (default).  
+  * `0` → no Dev infected (benign traffic only).  
+  * intermediate values (e.g., `25`, `50`, `75`) → approximately that fraction of Devs infected (rounded to the nearest integer).
 * `images` *(map)*: Docker image tags for each role (`tserver`, `attacker`, `ids`, `dev`).
 * `paths.results_subdir` *(str)*: Directory under the repo where logs/results go.
 * `paths.pids_dir` *(str)*: PID files for container/process bookkeeping.
@@ -476,6 +510,7 @@ Any config value that also has a CLI flag can be overridden per run. Common exam
 ```bash
 # Use config values except the ones you override here:
 ddosim -d 4 -a http -v debug create
+ddosim -d 10 -i 30 create       # ~30% of Devs infected for this run
 ddosim -t 900 ns3
 ddosim --destroy-scope all destroy
 ```
