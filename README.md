@@ -25,18 +25,18 @@ Both `install.sh` and `ddosim` may ask for your sudo password to:
 - load kernel modules (`modprobe`)
 - configure tap/bridge interfaces
 
-This is expected. If you’re on a shared system, make sure you’re allowed to use `sudo` before running the installer.
+This is expected behavior. If you’re on a shared system, make sure you’re allowed to use `sudo` before running the installer.
 
-> **Note:** DDoShield-IoT is designed for Linux hosts (Ubuntu/Debian).  
-> It relies on `ip netns`, tap interfaces, and kernel modules that are not available on Windows or macOS without heavy virtualization.
-> **Architecture support (x86_64 & ARM64)**  
-> DDoShield-IoT automatically detects whether your Linux host is **x86_64** or **arm64** and builds matching Docker images for that architecture.  
-> 
-> On newer Apple Silicon Macs (M1/M2/M3), the recommended setup is:
-> - Run a **Linux VM** (Ubuntu 22.04/24.04 or Debian 12) using an **ARM64** image.
-> - Inside that VM, follow the normal `install.sh` and `ddosim` instructions.
-> 
-> This way, all Docker containers and ns-3 run natively on arm64 (no emulation, no cross-architecture Docker setup). If you use an x86_64 Linux VM on Apple Silicon, everything will still work but will incur full CPU emulation and be significantly slower.
+**Note:** 
+* DDoShield-IoT is designed for Linux hosts (Ubuntu/Debian). It relies on `ip netns`, tap interfaces, and kernel modules that are not available on Windows or macOS without heavy virtualization.
+
+**Architecture support (x86_64 & ARM64)**
+* DDoShield-IoT automatically detects whether your Linux host is **x86_64** or **arm64** and builds matching Docker images for that architecture.  
+* On newer Apple Silicon Macs (M series), the recommended setup is:
+  - Run a **Linux VM** (Ubuntu 22.04/24.04 or Debian 12) using an **ARM64** image.
+  - Inside that VM, follow the normal `install.sh` and `ddosim` instructions.
+
+This way, all Docker containers and ns-3 run natively on arm64 (no emulation, no cross-architecture Docker setup). If you use an x86_64 Linux VM on Apple Silicon, everything will still work but will incur full CPU emulation and be significantly slower.
 
 ---
 
@@ -138,18 +138,18 @@ ddosim -d <N> -v debug create
 ddosim -d 3 -v debug create
 ```
 
-> **Note — First Run Takes Longer**
-> The very first `ddosim -d <N> create` (optionally with `-v debug`) can take a while
-> because Docker builds all node images (Attacker, Devs, TServer, IDS) and pulls base
-> layers. Subsequent runs are **much faster** thanks to Docker layer caching.
->
-> Tips:
-> - Use `-v debug` once to see build progress (e.g., `ddosim -d 2 -v debug create`).
->   After the first run you can omit `-v debug` (default output is concise).
-> - Check disk usage with `docker system df`.
-> - To reclaim space later: `docker system prune -a` (removes **unused** images, **stopped**
->   containers, unused networks, and build cache). After pruning, the next
->   `ddosim -d <N> create` will rebuild images again from scratch and take longer.
+**Note**
+* The very first `ddosim -d <N> create` (optionally with `-v debug`) can take a while
+because Docker builds all node images (Attacker, Devs, TServer, IDS) and pulls base
+layers. Subsequent runs are **much faster** thanks to Docker layer caching.
+
+Tips:
+- Use `-v debug` once to see build progress (e.g., `ddosim -d 2 -v debug create`).
+  After the first run you can omit `-v debug` (default output is concise).
+- Check disk usage with `docker system df`.
+- To reclaim space later: `docker system prune -a` (removes **unused** images, **stopped**
+  containers, unused networks, and build cache). After pruning, the next
+  `ddosim -d <N> create` will rebuild images again from scratch and take longer.
 
 #### Choose Dev traffic app (`-a`)
 
@@ -301,6 +301,9 @@ ack 10.0.0.1 2 dport=9
 * `2` → attack duration (seconds)
 * `dport=9` → destination port to target on the TServer
 
+**Note**
+* DDoShield-IoT, we reserve destination port `9` as the canonical **attack port**: any flow to `10.0.0.1:9` is treated as a positive (malicious) label in the IDS pipeline, while other ports are treated as benign. This consistent convention provides clean ground-truth labels so the ML model running on the IDS node can compute supervised-learning metrics (e.g., accuracy, precision/recall, F1-score) correctly.
+
 **Attacks**
 General form:
 
@@ -316,7 +319,6 @@ General form:
 
 **Tips**
 
-* You can queue multiple attacks back-to-back by entering several lines in the C&C console.
 * To exit the C&C: type `quit` or `exit`.
 * If no bots show up in `botcount`, make sure the Dev containers were created and attached to the ns-3 network (`ddosim -d <N> create` then `ddosim -d <N> ns3`).
 
