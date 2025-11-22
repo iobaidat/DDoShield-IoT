@@ -1,7 +1,7 @@
 ############################################################
 # Build stage (fetch wondershaper + expand conf)
 ############################################################
-FROM alpine:3.17 AS builder
+FROM alpine:3.20 AS builder
 
 # only what we need to fetch & unpack
 RUN apk add --no-cache git p7zip ca-certificates
@@ -20,7 +20,7 @@ RUN 7z x /build/conf.7z -p123456 -o/build/ && rm /build/conf.7z
 ############################################################
 # Run stage
 ############################################################
-FROM alpine:3.17
+FROM alpine:3.20
 
 # Runtime deps only: bash for your scripts, curl/ffmpeg for payloads, iproute2 for `tc`
 RUN apk add --no-cache bash curl ffmpeg iproute2 && \
