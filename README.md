@@ -192,8 +192,8 @@ By default, **all Devs are infected**, meaning each Dev runs the DDoS bot in add
 
 You can use `-i` to control what fraction of Devs are infected:
 
-* `-i 100` (default): all Devs run the DDoS test client.
-* `-i 0`: no Dev runs the DDoS client (only benign RTMP/HTTP/FTP traffic).
+* `-i 100` (default): all Devs run the mirai bot.
+* `-i 0`: no Dev runs the mirai bot (only benign RTMP/HTTP/FTP traffic).
 * `-i 50`: ~50% of Devs are infected (rounded to the nearest integer).  
   For example, `-d 2 -i 50` infects 1 Dev; `-d 5 -i 50` infects 2 Devs.
 
@@ -214,7 +214,7 @@ ddosim -d 10 -i 50 -v debug create
 
 **Notes**
 
-* `-i` affects only whether the Dev runs the DDoS bot client.
+* `-i` affects only whether the Dev runs the mirai bot.
 * All Devs still generate their chosen background traffic (RTMP/HTTP/FTP) according to `-a`.
 
 ### 4) Start the ns-3 network
